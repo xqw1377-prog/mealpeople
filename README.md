@@ -1,8 +1,27 @@
-# 餐时间工作旅程系统
+# 欢迎使用你的秒哒应用代码包
+秒哒应用链接
+    URL:https://www.miaoda.cn/projects/app-7daop8q0sxdt
 
-> 🎯 **每一刻工作，都值得更好体验** | 从入职到成长，全程智能陪伴
+# Restaurant Workforce Journey OS ｜ 餐饮员工工作旅途操作系统
+
+> 🧭 **AI 持续陪伴并推动每个人的工作旅途** | 让工作产生能力，让能力产生成长
 >
-> 💼 **员工全生命周期管理平台** - 让餐饮工作变得更简单、更有价值
+> 🚀 **Journey V4 产品范式**：围绕 Person / Employment / Role / Journey / Capability / Evidence / Growth 七个核心对象构建；AI 只 observe / reason / propose / act through capability，重要动作保留 human approval
+>
+> 📛 **更名说明（2026-10-03）**：项目原名「餐时间工作旅程系统」（`canshijian-work-journey-system`），正式更名为「Restaurant Workforce Journey OS / 餐饮员工工作旅途操作系统」。包名 `restaurant-workforce-journey-os`，界面短名「工作旅途」。本 README 下方历史变更日志中的旧名称为历史记录，保留原文。
+
+> 📍 **项目状态（2026-10-03 冻结）**
+>
+> | 项 | 状态 |
+> |---|---|
+> | Product Direction | Restaurant Workforce Journey OS |
+> | Current Runtime | Legacy V3.17 |
+> | Journey V4 | DESIGN / NOT YET IMPLEMENTED |
+> | AI-native Journey | VISION / NOT YET IMPLEMENTED |
+> | Legacy Function Freeze | IN FORCE |
+> | G0 Security | OPEN |
+>
+> ⚠️ 上方「AI 持续陪伴并推动每个人的工作旅途」为**产品愿景（PRODUCT VISION）**，当前代码中尚不存在 Journey Brain、Evidence Ledger、Agent Runtime。当前运行的是 Legacy V3.17 传统 HR 架构。请勿将愿景误读为已实现能力。
 >
 > 🚀 **新手？** 请先阅读 [START_HERE.md](./START_HERE.md) - 5分钟快速了解项目  
 > 📋 **快速参考？** 查看 [QUICK_REFERENCE.md](./QUICK_REFERENCE.md) - 5秒钟找到你需要的  

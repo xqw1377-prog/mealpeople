@@ -42,7 +42,7 @@ export default function Tutorial() {
       category: 'getting-started',
       icon: 'i-mdi-information',
       content: [
-        '餐时间日人力成本管控助手是一款专为餐饮行业设计的智能管理工具',
+        '餐饮员工工作旅途操作系统是一款专为餐饮行业设计的智能管理工具',
         '帮助企业实现科学排班、成本控制和数据分析',
         '支持多租户管理，数据完全隔离，安全可靠',
         '提供WEB端和小程序端双平台支持'

@@ -24,7 +24,7 @@ export default function PrivacyPolicy() {
                 miaoda-team（以下简称"我们"）非常重视用户的隐私保护。本隐私政策旨在向您说明我们如何收集、使用、存储、共享和保护您的个人信息。
               </Text>
               <Text className="text-base text-foreground leading-relaxed mt-2 block">
-                请您在使用餐时间工作旅程系统（以下简称"本系统"）之前，仔细阅读并充分理解本隐私政策。如果您不同意本隐私政策的任何内容，请不要使用本系统。
+                请您在使用餐饮员工工作旅途操作系统（以下简称"本系统"）之前，仔细阅读并充分理解本隐私政策。如果您不同意本隐私政策的任何内容，请不要使用本系统。
               </Text>
             </View>
 
@@ -222,7 +222,7 @@ export default function PrivacyPolicy() {
             {/* 结束语 */}
             <View className="mt-6 pt-4 border-t border-border">
               <Text className="text-base text-foreground leading-relaxed text-center">
-                感谢您信任并使用餐时间工作旅程系统！
+                感谢您信任并使用餐饮员工工作旅途操作系统！
               </Text>
               <Text className="text-sm text-muted-foreground text-center mt-2 block">
                 我们将持续努力保护您的隐私安全

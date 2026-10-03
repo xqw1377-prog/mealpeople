@@ -297,9 +297,7 @@ const EmployeeWorkspace: React.FC = () => {
               <View className="flex-1">
                 <Text className="text-white text-2xl font-bold mb-1">{getGreeting()}！</Text>
                 <Text className="text-white/80 text-sm mb-3">{getDateString()}</Text>
-                <Text className="text-white text-base font-medium">
-                  {employee?.name || '员工'}，欢迎使用餐时间工作台
-                </Text>
+                <Text className="text-white text-base font-medium">{employee?.name || '员工'}，欢迎使用工作旅途</Text>
               </View>
               <View className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-md">
                 <View className="i-mdi-account-circle text-4xl text-white" />

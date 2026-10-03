@@ -210,9 +210,9 @@ const Login: React.FC = () => {
               <View className="i-mdi-briefcase-clock text-5xl text-blue-600" />
             </View>
           </View>
-          <Text className="text-3xl font-bold text-white mb-2 block">餐时间工作台</Text>
+          <Text className="text-3xl font-bold text-white mb-2 block">工作旅途</Text>
           <Text className="text-sm text-white/90 block mb-1">每一刻工作，都值得更好体验</Text>
-          <Text className="text-xs text-white/70 block">员工全生命周期管理平台</Text>
+          <Text className="text-xs text-white/70 block">餐饮员工工作旅途操作系统</Text>
         </View>
 
         {/* 登录面板 - 使用 miaoda-auth-taro 提供的 LoginPanel */}
@@ -293,7 +293,7 @@ const Login: React.FC = () => {
 
         {/* 底部版权 */}
         <View className="mt-8">
-          <Text className="text-xs text-white/60">© 2025 餐时间日人力成本管控助手</Text>
+          <Text className="text-xs text-white/60">© 2026 餐饮员工工作旅途操作系统</Text>
         </View>
       </View>
     </ScrollView>

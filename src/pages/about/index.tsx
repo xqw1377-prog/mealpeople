@@ -33,8 +33,8 @@ export default function About() {
             <View className="w-24 h-24 rounded-lg bg-blue-100 flex items-center justify-center mx-auto mb-4">
               <View className="i-mdi-food text-6xl text-blue-600" />
             </View>
-            <Text className="text-2xl font-bold text-foreground mb-2">餐时间工作台</Text>
-            <Text className="text-sm text-muted-foreground mb-4">智能人力成本管控助手</Text>
+            <Text className="text-2xl font-bold text-foreground mb-2">工作旅途</Text>
+            <Text className="text-sm text-muted-foreground mb-4">餐饮员工工作旅途操作系统</Text>
             <View className="bg-blue-100 px-4 py-2 rounded-full inline-block">
               <Text className="text-xs text-foreground font-bold">版本 v1.0.0</Text>
             </View>
@@ -52,7 +52,7 @@ export default function About() {
               </View>
             </View>
             <Text className="text-sm text-foreground leading-relaxed">
-              餐时间工作台是一款专为餐饮行业打造的智能人力成本管控助手。基于营收-效能标准的多租户智能办公管理工具，支持多租户独立管理和数据完全隔离，帮助企业管理者实现科学排班和成本控制，支持多店连锁管理和智能化运营决策。
+              工作旅途是一款专为餐饮行业打造的员工工作旅途操作系统。在多租户独立管理、数据完全隔离的底座上，围绕员工工作旅途与能力成长组织招聘、入职、排班、培训、绩效全流程，帮助企业管理者实现科学排班、成本控制和智能化运营决策，让新人更快胜任、团队更稳定、组织更可复制。
             </Text>
           </View>
 
@@ -208,7 +208,7 @@ export default function About() {
 
           {/* 版权信息 */}
           <View className="text-center mb-20">
-            <Text className="text-xs text-white/80">© 2025 餐时间工作台</Text>
+            <Text className="text-xs text-white/80">© 2026 工作旅途</Text>
             <Text className="text-xs text-white/80 block mt-1">All Rights Reserved</Text>
           </View>
         </View>

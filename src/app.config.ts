@@ -1,4 +1,4 @@
-// 餐时间日人力成本管控助手 - 页面路由配置（分包优化版 - 8个分包）
+// Restaurant Workforce Journey OS（餐饮员工工作旅途操作系统）- 页面路由配置（分包优化版 - 8个分包）
 // 主包只保留TabBar页面、登录页面和核心入口页面，其他页面全部移到分包
 
 const pages = [
@@ -365,7 +365,7 @@ export default defineAppConfig({
   window: {
     backgroundTextStyle: 'light',
     navigationBarBackgroundColor: '#FF6C00',
-    navigationBarTitleText: '餐时间日人力成本管控助手',
+    navigationBarTitleText: '工作旅途',
     navigationBarTextStyle: 'white'
   },
   animation: true

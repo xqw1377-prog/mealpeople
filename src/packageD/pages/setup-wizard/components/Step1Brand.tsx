@@ -36,7 +36,7 @@ const Step1Brand: React.FC<Step1BrandProps> = ({initialData, onComplete}) => {
           <View className="i-mdi-office-building text-2xl text-blue-500" />
           <Text className="text-lg font-bold text-gray-800">品牌信息配置</Text>
         </View>
-        <Text className="text-sm text-gray-600">欢迎使用餐时间日人力成本管控助手！让我们先完善您的品牌信息。</Text>
+        <Text className="text-sm text-gray-600">欢迎使用餐饮员工工作旅途操作系统！让我们先完善您的品牌信息。</Text>
       </View>
 
       {/* 表单 */}

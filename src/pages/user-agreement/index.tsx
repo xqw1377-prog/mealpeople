@@ -26,7 +26,7 @@ export default function UserAgreement() {
             {/* 欢迎语 */}
             <View className="bg-blue-100 rounded-lg p-4 border border-border">
               <Text className="text-base text-foreground leading-relaxed font-medium">
-                欢迎您使用餐时间工作旅程系统（以下简称"本系统"）！
+                欢迎您使用餐饮员工工作旅途操作系统（以下简称"本系统"）！
               </Text>
               <Text className="text-sm text-foreground leading-relaxed mt-3 block">
                 在使用本系统之前，请您仔细阅读并充分理解本协议的全部内容。如果您不同意本协议的任何内容，请不要使用本系统。您使用本系统即表示您已阅读、理解并同意接受本协议的全部内容。
@@ -248,7 +248,7 @@ export default function UserAgreement() {
             <View className="mt-6 pt-6 border-t-2 border-border">
               <View className="bg-blue-100 rounded-lg p-4 text-center border border-border">
                 <Text className="text-base text-foreground font-bold leading-relaxed">
-                  感谢您使用餐时间工作旅程系统！
+                  感谢您使用餐饮员工工作旅途操作系统！
                 </Text>
                 <Text className="text-sm text-muted-foreground mt-2 block">本协议最终解释权归miaoda-team所有</Text>
               </View>

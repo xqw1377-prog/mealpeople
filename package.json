@@ -1,7 +1,7 @@
 {
-  "name": "canshijian-work-journey-system",
+  "name": "restaurant-workforce-journey-os",
   "version": "3.17.0",
-  "description": "餐时间工作旅程系统 - 员工全生命周期管理平台，让餐饮工作变得更简单、更有价值",
+  "description": "Restaurant Workforce Journey OS（餐饮员工工作旅途操作系统）- AI 持续陪伴并推动每个人的工作旅途，让工作产生能力、能力产生成长",
   "author": "miaoda-team",
   "license": "MIT",
   "templateInfo": {

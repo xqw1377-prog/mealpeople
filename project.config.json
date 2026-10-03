@@ -1,7 +1,7 @@
 {
   "miniprogramRoot": "dist/",
-  "projectname": "taro-react-starter",
-  "description": "taro-react-starter",
+  "projectname": "restaurant-workforce-journey-os",
+  "description": "Restaurant Workforce Journey OS 餐饮员工工作旅途操作系统",
   "appid": "wx3ac3f653002c2ab6",
   "setting": {
     "urlCheck": false,
