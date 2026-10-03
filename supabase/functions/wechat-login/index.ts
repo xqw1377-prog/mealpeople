@@ -67,8 +67,7 @@ Deno.serve(async (req) => {
 
     // 解析请求体
     const {wechatOpenid, wechatUnionid}: WechatLoginRequest = await req.json()
-    console.log('🔑 微信 OpenID:', wechatOpenid)
-    console.log('🔑 微信 UnionID:', wechatUnionid || '未提供')
+    console.log('🔑 收到微信登录请求')
 
     if (!wechatOpenid) {
       throw new Error('微信 OpenID 不能为空')
@@ -110,36 +109,27 @@ Deno.serve(async (req) => {
       role: profile.role
     })
 
-    // 如果当前登录的用户ID与绑定的用户ID不同，需要更新
+    // G0-B (P0-SEC-02): openid 属于其他账号时一律拒绝。
+    // 旧逻辑会把绑定者的 role/tenant_id/phone 复制到当前调用者——即账号接管，已删除。
     if (user.id !== profile.id) {
-      console.log('🔄 更新用户绑定...')
-      
-      // 更新当前用户的 profile
-      const updateData: any = {
-        tenant_id: profile.tenant_id,
-        role: profile.role,
-        phone: profile.phone,
-        wechat_openid: wechatOpenid,
-        updated_at: new Date().toISOString()
-      }
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message: '该微信已绑定其他账号，请先在原账号解除绑定后再试'
+        }),
+        {
+          headers: {...corsHeaders, 'Content-Type': 'application/json'},
+          status: 409
+        }
+      )
+    }
 
-      if (wechatUnionid) {
-        updateData.wechat_unionid = wechatUnionid
-      }
-
-      const {error: updateError} = await supabaseClient
+    if (wechatUnionid && profile.wechat_unionid !== wechatUnionid) {
+      // 仅允许维护本人的 unionid
+      await supabaseClient
         .from('profiles')
-        .upsert({
-          id: user.id,
-          ...updateData
-        })
-
-      if (updateError) {
-        console.error('❌ 更新用户信息失败:', updateError)
-        throw new Error(`更新用户信息失败: ${updateError.message}`)
-      }
-
-      console.log('✅ 用户信息已更新')
+        .update({wechat_unionid: wechatUnionid, updated_at: new Date().toISOString()})
+        .eq('id', user.id)
     }
 
     // 返回成功响应

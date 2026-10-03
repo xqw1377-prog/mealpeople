@@ -68,13 +68,25 @@ Deno.serve(async (req) => {
 
     // 解析请求体
     const {phone, wechatOpenid, wechatUnionid}: LoginRequest = await req.json()
-    console.log('📱 请求的电话号码:', phone)
-    console.log('🔑 微信 OpenID:', wechatOpenid ? '已提供' : '未提供')
-    console.log('🔑 微信 UnionID:', wechatUnionid ? '已提供' : '未提供')
+    console.log('📱 收到租户管理员登录请求')
 
     // 清理电话号码（去掉 +86 前缀）
     const cleanPhone = phone.replace(/^\+86/, '').replace(/\s/g, '')
-    console.log('📱 清理后的电话号码:', cleanPhone)
+
+    // G0-B (P0-SEC-02): 授权判定以 JWT 中的手机号为准，
+    // 请求体手机号仅作为比对目标——防止任何登录者冒用他人手机号获取管理员身份
+    const jwtPhone = (user.phone || (user.user_metadata as any)?.phone || '')
+      .replace(/^\+86/, '')
+      .replace(/\s/g, '')
+
+    if (!jwtPhone) {
+      throw new Error('当前账号未绑定手机号，无法进行租户管理员登录')
+    }
+
+    if (jwtPhone !== cleanPhone) {
+      console.log('🚫 手机号与登录账号不一致')
+      throw new Error('登录账号与该手机号不一致，无法进行租户管理员登录')
+    }
 
     // 查询该电话号码是否是某个租户的管理员
     console.log('🔍 查询租户信息...')

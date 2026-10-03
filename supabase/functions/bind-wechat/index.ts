@@ -43,12 +43,33 @@ Deno.serve(async (req) => {
       }
     })
 
+    // G0-B (P0-SEC-02): 身份以 JWT 为准——只允许为当前登录用户绑定微信
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      throw new Error('未提供授权信息')
+    }
+
+    const {
+      data: {user: authUser},
+      error: authError
+    } = await supabaseClient.auth.getUser(authHeader.replace('Bearer ', ''))
+
+    if (authError || !authUser) {
+      throw new Error('用户认证失败，请先登录')
+    }
+
+    const authUserId = authUser.id
+
     // 解析请求体
     const {code, userId}: BindWechatRequest = await req.json()
-    console.log('📝 请求参数:', {code: code?.substring(0, 10) + '...', userId})
+    console.log('📝 收到绑定微信请求')
 
     if (!code || !userId) {
       throw new Error('缺少必要参数：code 或 userId')
+    }
+
+    if (userId !== authUserId) {
+      throw new Error('不允许为其他用户绑定微信')
     }
 
     // 获取微信小程序配置
@@ -92,7 +113,7 @@ Deno.serve(async (req) => {
       .from('profiles')
       .select('id')
       .eq('wechat_openid', wechatData.openid)
-      .neq('id', userId)
+      .neq('id', authUserId)
       .maybeSingle()
 
     if (checkError) {
@@ -118,7 +139,7 @@ Deno.serve(async (req) => {
     const {error: updateError} = await supabaseClient
       .from('profiles')
       .update(updateData)
-      .eq('id', userId)
+      .eq('id', authUserId)
 
     if (updateError) {
       console.error('❌ 更新用户信息失败:', updateError)

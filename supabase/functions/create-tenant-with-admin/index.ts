@@ -16,14 +16,13 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // 获取请求参数
-    const {userId, phone} = await req.json()
+    // 获取请求参数（userId 已废弃：G0-B 起身份一律取自 JWT）
+    const {phone} = await req.json()
 
     console.log('=== Edge Function: create-tenant-with-admin 开始 ===')
-    console.log('参数:', {userId, phone})
 
     // 验证参数
-    if (!userId || !phone) {
+    if (!phone) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -47,13 +46,45 @@ Deno.serve(async (req: Request) => {
       }
     })
 
-    console.log('Supabase 客户端创建成功')
+    // G0-B (P0-SEC-02): 必须携带有效 JWT；身份与手机号以 JWT 为准
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({success: false, message: '未提供授权信息'}),
+        {status: 401, headers: {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'}}
+      )
+    }
+
+    const {
+      data: {user: authUser},
+      error: authError
+    } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''))
+
+    if (authError || !authUser) {
+      return new Response(
+        JSON.stringify({success: false, message: '用户认证失败，请先登录'}),
+        {status: 401, headers: {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'}}
+      )
+    }
+
+    const authUserId = authUser.id
+    const jwtPhone = (authUser.phone || (authUser.user_metadata as any)?.phone || '')
+      .replace(/^\+86/, '')
+      .replace(/\s/g, '')
+    const bodyPhone = phone.replace(/^\+86/, '').replace(/\s/g, '')
+
+    if (jwtPhone && jwtPhone !== bodyPhone) {
+      return new Response(
+        JSON.stringify({success: false, message: '手机号与登录账号不一致'}),
+        {status: 403, headers: {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'}}
+      )
+    }
 
     // 1. 检查 profile 是否存在
     const {data: existingProfile, error: profileCheckError} = await supabase
       .from('profiles')
       .select('id, tenant_id, role, name, phone')
-      .eq('id', userId)
+      .eq('id', authUserId)
       .maybeSingle()
 
     console.log('检查 profile:', existingProfile, '错误:', profileCheckError)
@@ -65,10 +96,10 @@ Deno.serve(async (req: Request) => {
       const {data: newProfile, error: createProfileError} = await supabase
         .from('profiles')
         .insert({
-          id: userId,
-          phone: phone,
+          id: authUserId,
+          phone: bodyPhone,
           role: 'employee',
-          name: `用户_${phone.slice(-4)}`
+          name: `用户_${bodyPhone.slice(-4)}`
         })
         .select()
         .single()
@@ -95,7 +126,7 @@ Deno.serve(async (req: Request) => {
     const {data: profileWithTenant, error: tenantCheckError} = await supabase
       .from('profiles')
       .select('id, tenant_id, role')
-      .eq('id', userId)
+      .eq('id', authUserId)
       .single()
 
     console.log('检查租户:', profileWithTenant, '错误:', tenantCheckError)
@@ -116,7 +147,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // 4. 创建新租户
-    const tenantName = `租户_${phone.slice(-4)}`
+    const tenantName = `租户_${bodyPhone.slice(-4)}`
     console.log('创建新租户:', tenantName)
 
     const {data: newTenant, error: createTenantError} = await supabase
@@ -177,7 +208,7 @@ Deno.serve(async (req: Request) => {
         tenant_id: newTenant.id,
         role: 'tenant_admin'
       })
-      .eq('id', userId)
+      .eq('id', authUserId)
       .select()
       .single()
 
