@@ -134,28 +134,28 @@ const JoinTenant: React.FC = () => {
               <>
                 <View className="flex items-center gap-2 mb-4">
                   <View className="i-mdi-check-circle text-3xl text-muted-foreground"></View>
-                  <Text className="text-lg font-bold text-green-600">邀请码有效</Text>
+                  <Text className="text-lg font-bold text-green-600">邀请码格式正确</Text>
                 </View>
 
                 <View className="space-y-3 mb-4">
                   <View className="bg-white rounded-xl p-3 border-2 border-gray-200">
                     <Text className="text-xs text-muted-foreground block mb-1">租户名称</Text>
                     <Text className="text-base font-semibold text-foreground">
-                      {validation.data?.tenants?.name || '未知'}
+                      {validation.data?.tenants?.name || '提交时确认'}
                     </Text>
                   </View>
 
                   <View className="bg-white rounded-xl p-3 border-2 border-gray-200">
                     <Text className="text-xs text-muted-foreground block mb-1">店铺名称</Text>
                     <Text className="text-base font-semibold text-foreground">
-                      {validation.data?.store_name || '未知'}
+                      {validation.data?.store_name || '提交时确认'}
                     </Text>
                   </View>
 
                   <View className="bg-white rounded-xl p-3 border-2 border-gray-200">
                     <Text className="text-xs text-muted-foreground block mb-1">加入后角色</Text>
                     <Text className="text-base font-semibold text-foreground">
-                      {getRoleLabel(validation.data?.role || 'employee')}
+                      {validation.data?.role ? getRoleLabel(validation.data.role) : '提交时确认'}
                     </Text>
                   </View>
                 </View>

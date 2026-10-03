@@ -168,21 +168,21 @@ END $$;
 SELECT set_config('role','postgres', true);
 
 -- ============================================================
--- T8 回归（应为真）：无租户员工首次加入租户（NULL -> A，role 保持 employee）
+-- T8 宪法条款（G0-A-R 修订）：无租户用户首次自助加入租户 = DENY
+--（原 ALLOW 放行已被 00116 撤销：membership 只能经 redeem_invite 签发）
 -- ============================================================
 SELECT set_config('role','authenticated', true);
 SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000006","role":"authenticated"}', true);
 DO $$
 BEGIN
-  UPDATE public.profiles SET tenant_id = '11111111-1111-1111-1111-111111111111'
-   WHERE id = '99999999-0000-0000-0000-000000000006';
-  IF NOT FOUND THEN
-    INSERT INTO g0_results VALUES ('T8','FAIL','首次加入租户被拒(0行)');
-  ELSE
-    INSERT INTO g0_results VALUES ('T8','PASS','首次加入租户路径保留');
-  END IF;
-EXCEPTION WHEN OTHERS THEN
-  INSERT INTO g0_results VALUES ('T8','FAIL','首次加入租户路径被误伤: '||SQLERRM);
+  BEGIN
+    UPDATE public.profiles SET tenant_id = '11111111-1111-1111-1111-111111111111'
+     WHERE id = '99999999-0000-0000-0000-000000000006';
+  EXCEPTION WHEN insufficient_privilege THEN
+    INSERT INTO g0_results VALUES ('T8','PASS','NULL->tenant 自助写入被 DENY（走 redeem_invite）');
+    RETURN;
+  END;
+  INSERT INTO g0_results VALUES ('T8','FAIL','无租户用户仍可自助写入 tenant_id（击穿租户隔离）');
 END $$;
 SELECT set_config('role','postgres', true);
 

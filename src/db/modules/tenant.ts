@@ -515,38 +515,17 @@ export async function generateInvitationCode(
 
 /**
  * 验证邀请码
+ *
+ * G0-A-R: 邀请码信息不再对客户端预读（防枚举）。这里仅做本地格式校验，
+ * 真实有效性（存在/未过期/未用尽/角色）由 join_tenant_with_code 在
+ * 兑换时于服务端校验。
  */
 export async function validateInvitationCode(code: string) {
-  const {data, error} = await supabase
-    .from('invitation_codes')
-    .select('*, tenants(*)')
-    .eq('code', code)
-    .eq('status', 'active')
-    .maybeSingle()
-
-  if (error) {
-    console.error('验证邀请码失败:', error)
-    return {valid: false, message: '邀请码无效'}
+  const normalized = code.trim().toUpperCase()
+  if (!/^[A-Z0-9]{4,16}$/.test(normalized)) {
+    return {valid: false, message: '邀请码格式不正确'}
   }
-
-  if (!data) {
-    return {valid: false, message: '邀请码不存在'}
-  }
-
-  // 检查是否过期
-  if (data.expires_at && new Date(data.expires_at) < new Date()) {
-    return {valid: false, message: '邀请码已过期'}
-  }
-
-  // 检查使用次数
-  if (data.used_count >= data.max_uses) {
-    return {valid: false, message: '邀请码已达到最大使用次数'}
-  }
-
-  return {
-    valid: true,
-    data: data
-  }
+  return {valid: true, message: '', data: null}
 }
 
 /**

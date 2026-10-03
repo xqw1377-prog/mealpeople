@@ -1,6 +1,12 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import {createClient} from 'jsr:@supabase/supabase-js@2'
 
+// ⚠️ G0-A-R 登记: LEGACY AUTHORITY PATH — TO BE RETIRED
+// 本函数按"手机号匹配 tenants.admin_phone"发行 tenant_admin 权限，
+// 属于"字段匹配=发行权限"的旧模型。G0 保留兼容（已要求 JWT 手机号一致），
+// 目标形态：verified identity + server-issued membership => 权限，
+// 由 Membership Authority（redeem_invite / 后台指派）替代，届时本函数退役。
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'

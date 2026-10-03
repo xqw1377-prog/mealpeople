@@ -2,6 +2,13 @@ import {createClient} from 'jsr:@supabase/supabase-js@2'
 
 // Edge Function: 创建租户并设置管理员
 // 使用 service_role_key，绕过 RLS 策略限制
+//
+// ⚠️ G0-A-R 登记: TENANT_CREATION_POLICY = SELF-SERVICE（待产品侧最终确认）
+// 当前商业流程为"注册用户可自建企业并成为其 tenant_admin"（README 快速开始）。
+// 本函数已要求：有效 JWT + 请求体手机号与 JWT 一致。
+// 若产品裁定改为受控开通（platform capability/审批/订阅），
+// 须在入口增加相应授权来源校验，仅 JWT 不足以创建租户。
+// 防滥用：单账号一生仅一租户（已有 tenant_id 时提前返回）。
 
 Deno.serve(async (req: Request) => {
   // 处理 CORS 预检请求

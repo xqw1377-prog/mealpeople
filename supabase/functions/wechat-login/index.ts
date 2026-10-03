@@ -124,13 +124,10 @@ Deno.serve(async (req) => {
       )
     }
 
-    if (wechatUnionid && profile.wechat_unionid !== wechatUnionid) {
-      // 仅允许维护本人的 unionid
-      await supabaseClient
-        .from('profiles')
-        .update({wechat_unionid: wechatUnionid, updated_at: new Date().toISOString()})
-        .eq('id', user.id)
-    }
+    // G0-A-R 不变量: CLIENT NEVER ASSERTS WECHAT IDENTITY。
+    // 本函数不再写任何微信身份字段（unionid 写入已删除——客户端声明的值
+    // 不可作为身份事实；unionid 只能经 bind-wechat 由服务端 code 换取写入）。
+    // 本函数保留只读查询：openid 绑定者非本人时 409 拒绝。
 
     // 返回成功响应
     const responseData = {
