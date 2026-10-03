@@ -25,7 +25,15 @@ import {
 } from '@/db/api-employment'
 import type {EmploymentContract} from '@/db/types-employment'
 import {useTenantStore} from '@/store/tenant'
+import {useSignatureViewUrl} from '@/utils/signature-view'
 import {getUserIpAddress, uploadSignature} from '@/utils/signature-upload'
+
+/** G0-E: 签名 bucket 私有化后，列表内的签名图通过运行时签名 URL 显示 */
+const SignatureImage: React.FC<{url?: string | null}> = ({url}) => {
+  const viewUrl = useSignatureViewUrl(url)
+  if (!viewUrl) return null
+  return <Image src={viewUrl} mode="aspectFit" className="w-24 h-16 border border-gray-300 rounded" />
+}
 
 const MyContractSign: React.FC = () => {
   const {user} = useAuth({guard: true})
@@ -346,11 +354,7 @@ const MyContractSign: React.FC = () => {
                       {contract.employee_signature_url && (
                         <View className="mb-3 p-3 bg-gray-50 rounded-lg">
                           <Text className="text-xs text-muted-foreground mb-2">我的签名：</Text>
-                          <Image
-                            src={contract.employee_signature_url}
-                            mode="aspectFit"
-                            className="w-24 h-16 border border-gray-300 rounded"
-                          />
+                          <SignatureImage url={contract.employee_signature_url} />
                         </View>
                       )}
 

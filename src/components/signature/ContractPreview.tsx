@@ -13,6 +13,7 @@ import {Button, Image, ScrollView, Text, View} from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import type React from 'react'
 import type {EmploymentContract} from '@/db/types-employment'
+import {useSignatureViewUrl} from '@/utils/signature-view'
 
 interface ContractPreviewProps {
   contract: EmploymentContract
@@ -35,6 +36,10 @@ const ContractPreview: React.FC<ContractPreviewProps> = ({
   signButtonText = '立即签署',
   showDownloadButton = false
 }) => {
+  // G0-E: 签名 bucket 私有化后，存量 URL 需在运行时换取签名 URL
+  const companySignatureView = useSignatureViewUrl(contract?.company_signature_url)
+  const employeeSignatureView = useSignatureViewUrl(contract?.employee_signature_url)
+
   // 格式化日期
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return '____年__月__日'
@@ -249,7 +254,7 @@ const ContractPreview: React.FC<ContractPreviewProps> = ({
                   {contract.company_signature_url ? (
                     <View>
                       <Image
-                        src={contract.company_signature_url}
+                        src={companySignatureView || undefined}
                         mode="aspectFit"
                         className="w-32 h-20 border border-gray-300 rounded"
                       />
@@ -276,7 +281,7 @@ const ContractPreview: React.FC<ContractPreviewProps> = ({
                   {contract.employee_signature_url ? (
                     <View>
                       <Image
-                        src={contract.employee_signature_url}
+                        src={employeeSignatureView || undefined}
                         mode="aspectFit"
                         className="w-32 h-20 border border-gray-300 rounded"
                       />
