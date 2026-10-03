@@ -1,10 +1,23 @@
-# G0 SECURITY 整改总文档（G0-F / G0-G / G0-A-R）
+# G0 SECURITY 整改总文档（G0-F / G0-G / G0-A-R / G0-Z）
 
 > 项目：Restaurant Workforce Journey OS（餐饮员工工作旅途操作系统）
 > 分支：`g0-security`　|　治理裁定日期：2026-10-03
-> 纪律：LEGACY FUNCTION FREEZE 生效中——G0 只修安全，不新增业务功能、不建 Journey 表、不做 AI、不做 UI。
+> 纪律：LEGACY FUNCTION FREEZE 生效中——G0 只修安全，不新增业务功能、不建 Journey 表、不做 AI、不做 UI。**G0-Z 是最后一个安全批次；PASS 后立即停止安全扩 scope。**
 >
-> **当前裁定状态（2026-10-03 复审）**：G0 = **HOLD**；G0-A = REOPEN（已由 G0-A-R 交付修复）；G0-B = CODE-COMPLETE/VERIFY；G0-C = BLOCKED-BY-G0-A（G0-A-R 落库后重跑）；G0-D = PENDING-LIVE-VERIFY；G0-E = REOPEN/POLICY-VERIFY（已由 00116 第 5 节收紧）；G0-F = PENDING-HUMAN-ACTION；G0-G = PENDING-LIVE-VERIFY。**Secret 轮换为 G0 PASS 硬门槛。**
+> **当前裁定状态（2026-10-03 第三轮裁定）**：G0 = **HOLD**（差关闭阶段）；G0-A-R = IMPLEMENTED / PENDING LIVE VERIFY；G0-Z = **DELIVERED / PENDING LIVE VERIFY**。Secret 轮换与真实 JWT 黑盒矩阵为 G0 PASS 硬门槛。
+
+---
+
+## 零-B、G0-Z SECURITY CLOSURE（最终关闭批次，已交付）
+
+| 项 | 交付 | 说明 |
+|---|---|---|
+| Z1 issuer authority | `00117` | 安全根改为**数据库主体+列级权限**：专用 `membership_issuer_owner`（NOLOGIN）拥有 issuer 函数；`REVOKE UPDATE/INSERT (role, tenant_id) ON profiles FROM authenticated`——protected columns，任何直写（含 `SET role=role` 同值写）直接 42501；GUC 降级为 issuer 内部上下文（纵深防御第二层，非授权根）。新增受控指派 RPC `admin_assign_member_role`（白名单 employee/store_manager/agent/tenant_admin、限本租户、不可自改、写 membership_audit append-only 审计）；前端 `updateUserRole` 已接线该 RPC |
+| Z2 invite credential | `00118` | INV-1 服务端 128bit 熵码（`generate_invitation_code` 重写）+ INSERT 策略强制新码 ≥16 位；**INV-2 登记 PARTIAL**（管理员须可读码发给员工，明文为运营必需；已用熵补偿撞码面）；INV-3 兑换失败统一文案"邀请码无效或不可用"（无 oracle）；INV-4 限流表 10min/10 次失败；INV-5 bearer invite 只发 employee（store_manager 等须经 `admin_assign_member_role` 指派）；`invitation_code_uses` 补 tenant_id/role_granted 并 append-only；`used_count` 管理员不可手改；前端 `createInvitationCode` 已改调服务端 RPC |
+| Z3 provisioning | `00119` + 函数 | `TENANT_CREATION_POLICY = CONTROLLED_PROVISIONING` 冻结：tenants INSERT 收回 super_admin only（23 号 WITH CHECK(true) 撤销）；edge function 仅接受 super_admin JWT 或平台 `PROVISIONING_TOKEN`（常数时间比较）；公开 self-service 暂停，正式 SaaS onboarding 就绪后再评估。`tenant-admin-login` 终态：Login 只证明 Identity，不发行 Membership/Role（该原则进入 Domain Constitution） |
+| Z4 storage 授权 | `00119` + 前端 | 签名 INSERT 校验路径 `{tenant}/{contract}/` 指向调用者有权的**真实合同**（员工本人或同租户管理角色）；DELETE 收紧为 owner 或同租户管理角色；新写入只存 `contract_signatures://{object_path}`（不再保存 public URL，前端已改）；历史 URL 仅兼容解析；signed URL TTL 1h → **10 分钟** |
+| Z5 黑盒矩阵 | `g0z_blackbox_matrix.sh` | 真实 anon key + 四类账号 JWT 从 PostgREST/RPC/Storage/Edge 网络入口打 A1-A6/B1-B3/C1/D1-D4/E1-E3/F1-F3 + 正向 G1-G2，输出 markdown 证据包到 `run-logs/`。**SQL 模拟测试不再是最终证据，本矩阵全绿才是** |
+| Z6 secret rotation | 本文档 §2 | 补充：轮换后须验证**旧值已失效**（用旧 anon key 调 REST 期望 401；旧 service_role 调 admin API 期望 401）；只删 `.env` 不算修复 |
 
 ---
 
@@ -48,6 +61,11 @@
 3. [ ] **微信：轮换 AppSecret**（mp.weixin.qq.com → 开发管理 → 开发设置 → 重置），更新 Edge Functions 的 `WECHAT_APPSECRET`。仓库内 `.env` 该值为占位符，未泄露。
 4. [ ] **确认 `.env` 不再进入分发物**：打包/上传流程排除 `src/.env`（Miaoda 平台打包配置）；`git check-ignore src/.env` 若未忽略则补 `.gitignore`。
 5. [ ] **数据库直连凭证排查**：确认无任何 `postgres` 角色密码出现在代码/文档/聊天记录中；有则改密。
+6. [ ] **旧值失效验证（Z6 硬性要求，只删 `.env` 不算修复）**：
+   - 旧 anon key：`curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/rest/v1/profiles?select=id&limit=1" -H "apikey: <旧anon key>"` → 期望 **401**
+   - 旧 service_role：调用任一 admin 接口 → 期望 **401**
+   - 旧微信 AppSecret：`jscode2session` 用旧 secret → 期望 errcode 40125/40013
+   - 三项截图存 `run-logs/rotation-proof.png`
 
 ## 三、G0-G：安全不变量测试运行说明
 
@@ -93,6 +111,11 @@ curl -s -o /dev/null -w "%{http_code}\n" "<signedUrl>"
 6. 10 张排班/配置表与 24 个薪酬绩效策略、5 张招聘/离职表：跨租户访问、匿名访问一律 DENY（租户内成员行为不变）。
 7. 合同签名图片：匿名直链失效；系统内显示改走 1 小时签名 URL。
 8. 已知遗留（G0 不处理）：`contract-pdf-generator.ts` 引用不存在的 bucket `app-7daop8q0sxdt_contract_signatures`；同租户内店经理/员工不分权（P1）；`efficiency_standards` 的 guest 测试策略仅存在于部分迁移。
+9. （G0-A-R）加入企业唯一路径=邀请码兑换；首登 `tenant_id` 保持 NULL 直至兑换。
+10. （G0-Z1）管理员改角色一律走 `admin_assign_member_role` RPC（前端 `updateUserRole` 已接线）；不能改自己；super_admin 角色不可经 RPC 授予。
+11. （G0-Z2）存量 6 位旧邀请码仍可兑换（低熵风险由限流缓解），新签发一律 32 位高熵码；bearer 邀请只授予 employee，store_manager/agent/tenant_admin 须管理员指派；兑换失败统一文案。
+12. （G0-Z3）企业开通冻结为 CONTROLLED_PROVISIONING：普通用户自助建企业（登录页/快速开始/客户端直写路径）全部停用，租户由平台侧（super_admin 管理端或 provisioning token 通道）创建。需为试点门店预建租户与管理员。
+13. （G0-Z4）新签名只存 `contract_signatures://{path}`；签名图签名 URL 有效期 10 分钟。
 
 ## 五、G0 状态登记（2026-10-03 复审后）
 
@@ -104,8 +127,9 @@ curl -s -o /dev/null -w "%{http_code}\n" "<signedUrl>"
 | G0-C | BLOCKED-BY-G0-A | ✅ 00112 | 策略名经生产快照核对 ✅ | 脚本就绪未执行 | **PENDING-LIVE-VERIFY（依赖 G0-A-R 生效）** |
 | G0-D | PENDING-LIVE-VERIFY | ✅ 00113+00114 | 同上 ✅ | 脚本就绪未执行 | **PENDING-LIVE-VERIFY** |
 | G0-E | REOPEN/POLICY-VERIFY→已交付 | ✅ 00115+00116§5（按合同授权） | tsgo ✅ biome ✅ | 3.3 curl 未执行 | **PENDING-LIVE-VERIFY** |
-| G0-F | PENDING-HUMAN-ACTION | 手册就绪 | — | — | **等待人工执行轮换（PASS 硬门槛）** |
-| G0-G | PENDING-LIVE-VERIFY | 套件就绪（5 SQL+1 curl） | — | — | **待 3.1-3.3 全绿后各批次转 PASS** |
+| G0-F | PENDING-HUMAN-ACTION | 手册就绪（含旧值失效验证） | — | — | **等待人工执行轮换（PASS 硬门槛）** |
+| G0-G | PENDING-LIVE-VERIFY | 套件就绪（6 SQL+2 curl） | — | — | **待 3.1-3.3 + 黑盒矩阵全绿后各批次转 PASS** |
+| **G0-Z** | **CLOSURE 批次** | ✅ Z1-Z4 代码完成（00117-00119+函数+前端） | tsgo/biome ✅ | g0z SQL（Z1-1…Z3-1）+ 黑盒脚本就绪未执行 | **PENDING-LIVE-VERIFY；Z6 轮换待人工** |
 
 ### 攻击矩阵（3.1/3.2 执行时按此核对期望值）
 

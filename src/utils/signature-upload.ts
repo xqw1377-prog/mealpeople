@@ -67,10 +67,9 @@ export async function uploadSignature(
       return null
     }
 
-    // 获取公开访问 URL
-    const {data: urlData} = supabase.storage.from('contract_signatures').getPublicUrl(data.path)
-
-    return urlData.publicUrl
+    // G0-Z4: 新写入只保存 bucket + object_path（不再保存 public URL）。
+    // 显示端经 signature-view 换取短时签名 URL；历史公开 URL 仅做兼容解析。
+    return `contract_signatures://${data.path}`
   } catch (error) {
     console.error('上传签名异常:', error)
     return null
@@ -80,24 +79,28 @@ export async function uploadSignature(
 /**
  * 删除签名图片
  *
- * @param signatureUrl - 签名图片的公开访问 URL
+ * @param signatureUrl - 签名引用（新格式 contract_signatures://{path} 或历史公开 URL）
  * @returns 是否删除成功
  */
 export async function deleteSignature(signatureUrl: string): Promise<boolean> {
   try {
-    // 从 URL 中提取文件路径
-    const url = new URL(signatureUrl)
-    const pathParts = url.pathname.split('/')
-    const bucketIndex = pathParts.indexOf('contract_signatures')
-    if (bucketIndex === -1) {
-      console.error('无效的签名 URL')
-      return false
+    // G0-Z4: 优先解析新 object_path 格式，兼容历史公开 URL
+    let filePath: string | null = null
+    if (signatureUrl.startsWith('contract_signatures://')) {
+      filePath = signatureUrl.substring('contract_signatures://'.length)
+    } else {
+      const url = new URL(signatureUrl)
+      const pathParts = url.pathname.split('/')
+      const bucketIndex = pathParts.indexOf('contract_signatures')
+      if (bucketIndex === -1) {
+        console.error('无效的签名 URL')
+        return false
+      }
+      filePath = pathParts.slice(bucketIndex + 1).join('/')
     }
 
-    const filePath = pathParts.slice(bucketIndex + 1).join('/')
-
     // 从 Supabase Storage 删除
-    const {error} = await supabase.storage.from('contract_signatures').remove([filePath])
+    const {error} = await supabase.storage.from('contract_signatures').remove([filePath!])
 
     if (error) {
       console.error('删除签名失败:', error)

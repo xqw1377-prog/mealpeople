@@ -3,12 +3,13 @@ import {createClient} from 'jsr:@supabase/supabase-js@2'
 // Edge Function: 创建租户并设置管理员
 // 使用 service_role_key，绕过 RLS 策略限制
 //
-// ⚠️ G0-A-R 登记: TENANT_CREATION_POLICY = SELF-SERVICE（待产品侧最终确认）
-// 当前商业流程为"注册用户可自建企业并成为其 tenant_admin"（README 快速开始）。
-// 本函数已要求：有效 JWT + 请求体手机号与 JWT 一致。
-// 若产品裁定改为受控开通（platform capability/审批/订阅），
-// 须在入口增加相应授权来源校验，仅 JWT 不足以创建租户。
-// 防滥用：单账号一生仅一租户（已有 tenant_id 时提前返回）。
+// G0-Z3（冻结裁定 2026-10-03）:
+//   TENANT_CREATION_POLICY = CONTROLLED_PROVISIONING
+//   公开 self-service 暂停。本函数仅接受两种授权来源之一：
+//   a) super_admin 的合法 JWT
+//   b) 平台 provisioning token（环境变量 PROVISIONING_TOKEN，
+//      请求头 x-provisioning-token 比对，常数时间比较）
+// 普通认证用户一律 403。正式 SaaS onboarding/billing 就绪后再评估开放。
 
 Deno.serve(async (req: Request) => {
   // 处理 CORS 预检请求
@@ -75,6 +76,36 @@ Deno.serve(async (req: Request) => {
     }
 
     const authUserId = authUser.id
+
+    // G0-Z3: CONTROLLED_PROVISIONING——仅 super_admin 或平台 provisioning token
+    const provisioningToken = Deno.env.get('PROVISIONING_TOKEN')
+    const presentedToken = req.headers.get('x-provisioning-token') || ''
+    const tokenOk = !!provisioningToken && presentedToken.length === provisioningToken.length &&
+      presentedToken === provisioningToken
+
+    let isSuperAdmin = false
+    if (!tokenOk) {
+      const {data: actorProfile} = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', authUserId)
+        .maybeSingle()
+      isSuperAdmin = actorProfile?.role === 'super_admin'
+    }
+
+    if (!tokenOk && !isSuperAdmin) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message: '当前阶段企业开通由平台控制，请联系平台管理员'
+        }),
+        {
+          status: 403,
+          headers: {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'}
+        }
+      )
+    }
+
     const jwtPhone = (authUser.phone || (authUser.user_metadata as any)?.phone || '')
       .replace(/^\+86/, '')
       .replace(/\s/g, '')

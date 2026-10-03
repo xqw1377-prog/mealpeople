@@ -1,9 +1,9 @@
 /**
- * 合同签名查看工具（G0-E 配套）
+ * 合同签名查看工具（G0-E / G0-Z4 配套）
  *
- * 背景：contract_signatures bucket 已私有化（迁移 00115），
- * 库中历史存量的 getPublicUrl 直链对匿名失效。显示端统一通过
- * 本工具把存量 URL 换成 1 小时有效的签名 URL。
+ * bucket 已私有化且策略按合同相关方授权；库中新数据只存
+ * `contract_signatures://{object_path}`，历史数据存公开 URL（仅兼容解析）。
+ * 显示端统一经本工具换取短时签名 URL。
  *
  * 设计理念：容易学、容易做、容易管
  */
@@ -12,11 +12,16 @@ import {useEffect, useState} from 'react'
 import {supabase} from '@/client/supabase'
 
 const BUCKET = 'contract_signatures'
-const VIEW_TTL_SECONDS = 3600
+const URI_PREFIX = `${BUCKET}://`
+// G0-Z4: 签名图无长时分享场景，TTL 从 1h 缩至 10 分钟
+const VIEW_TTL_SECONDS = 600
 
-/** 从历史公开 URL 中提取 bucket 内的对象路径；非本 bucket 的 URL 原样返回 null 标记 */
+/** 解析签名引用（新 object_path 格式或历史公开 URL）为 bucket 内路径 */
 export function extractSignaturePath(url?: string | null): string | null {
   if (!url) return null
+  if (url.startsWith(URI_PREFIX)) {
+    return url.substring(URI_PREFIX.length).split('?')[0] || null
+  }
   const marker = `/${BUCKET}/`
   const idx = url.indexOf(marker)
   if (idx === -1) return null

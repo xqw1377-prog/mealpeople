@@ -135,7 +135,12 @@ export async function updateUserProfile(id: string, updates: Partial<Profile>): 
  * 更新用户角色
  */
 export async function updateUserRole(userId: string, role: UserRole): Promise<boolean> {
-  const {error} = await supabase.from('profiles').update({role}).eq('id', userId)
+  // G0-Z1: profiles.role 为 protected column，前端直写已被列级权限拒绝；
+  // 一律走服务端受控指派 RPC（白名单/本租户/不可自改/审计）
+  const {error} = await supabase.rpc('admin_assign_member_role', {
+    p_target_user: userId,
+    p_new_role: role
+  })
 
   if (error) {
     console.error('更新用户角色失败:', error)

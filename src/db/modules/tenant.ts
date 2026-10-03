@@ -489,8 +489,13 @@ export async function generateInvitationCode(
     role?: UserRole
   }
 ) {
-  // 生成6位随机邀请码
-  const code = Math.random().toString(36).substring(2, 8).toUpperCase()
+  // G0-Z2 INV-1: 码由服务端生成（128bit 熵），客户端不再自造短码
+  const {data: generated, error: genError} = await supabase.rpc('generate_invitation_code')
+  if (genError || !generated) {
+    console.error('生成邀请码失败:', genError)
+    return null
+  }
+  const code = String(generated)
 
   const {data, error} = await supabase
     .from('invitation_codes')

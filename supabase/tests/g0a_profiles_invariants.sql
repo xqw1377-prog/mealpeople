@@ -150,12 +150,14 @@ SELECT set_config('role','postgres', true);
 
 -- ============================================================
 -- T7 回归（应为真）：员工可修改自己的非特权字段（如 name）
+--（G0-Z1 后 role/tenant_id 为 protected columns，SET 子句出现即 42501，
+--  故此处只动 name）
 -- ============================================================
 SELECT set_config('role','authenticated', true);
 SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000003","role":"authenticated"}', true);
 DO $$
 BEGIN
-  UPDATE public.profiles SET name = 'G0A回归测试' , role = role
+  UPDATE public.profiles SET name = 'G0A回归测试'
    WHERE id = '99999999-0000-0000-0000-000000000003';
   IF NOT FOUND THEN
     INSERT INTO g0_results VALUES ('T7','FAIL','员工无法更新自己的资料(0行)');
