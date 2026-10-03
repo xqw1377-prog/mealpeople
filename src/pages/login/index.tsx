@@ -256,7 +256,7 @@ const Login: React.FC = () => {
                 <Text className="text-xs text-white/90 leading-relaxed block mb-2">💬 支持微信一键登录，快速便捷</Text>
                 <Text className="text-xs text-white/90 leading-relaxed block mb-2">🎭 首次登录自动创建账号</Text>
                 <Text className="text-xs text-white/90 leading-relaxed block mb-2">
-                  👑 第一个注册的用户自动成为超级管理员
+                  👥 新注册用户默认为普通员工，通过企业邀请码加入团队
                 </Text>
                 <Text className="text-xs text-white/90 leading-relaxed block">
                   👥 后续用户默认为普通员工，可由管理员授权

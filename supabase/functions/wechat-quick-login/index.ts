@@ -265,12 +265,12 @@ Deno.serve(async (req: Request) => {
       userId = authUser.user.id
       console.log('✅ 创建 auth 用户成功:', userId)
 
-      // 检查是否是第一个用户（应该成为 super_admin）
-      const {count} = await supabase.from('profiles').select('*', {count: 'exact', head: true})
+      // G0-CLOSURE-R1: 移除 first-user super_admin bootstrap
+      // （CONTROLLED_PROVISIONING：注册/登录只发行非特权身份，
+      //   super_admin 仅经平台受控 provisioning 创建）
+      const role = 'guest'
 
-      const role = count === 0 ? 'super_admin' : 'guest'
-
-      console.log('👑 用户角色:', role, '(总用户数:', count, ')')
+      console.log('👤 用户角色:', role)
 
       // 在 profiles 表中创建记录
       const {error: createProfileError} = await supabase.from('profiles').insert({

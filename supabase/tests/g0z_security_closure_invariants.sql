@@ -14,6 +14,11 @@ INSERT INTO public.tenants (id, name, status) VALUES
   ('11111111-1111-1111-1111-111111111111', 'G0Z-TENANT-A', 'active'),
   ('22222222-2222-2222-2222-222222222222', 'G0Z-TENANT-B', 'active');
 
+-- G0-CLOSURE-R1: 两家门店（R1-4 同租户校验用例）
+INSERT INTO public.stores (id, tenant_id, name) VALUES
+  ('33333333-0000-0000-0000-0000000000a1', '11111111-1111-1111-1111-111111111111', 'G0Z-STORE-A'),
+  ('33333333-0000-0000-0000-0000000000b1', '22222222-2222-2222-2222-222222222222', 'G0Z-STORE-B');
+
 INSERT INTO public.profiles (id, phone, role, tenant_id) VALUES
   ('99999999-0000-0000-0000-000000000002', '13800000002', 'tenant_admin', '11111111-1111-1111-1111-111111111111'),
   ('99999999-0000-0000-0000-000000000003', '13800000003', 'employee',     '11111111-1111-1111-1111-111111111111'),
@@ -338,6 +343,97 @@ BEGIN
   ELSE
     INSERT INTO g0z_results VALUES ('R2-3','PASS','明文 code 列不再是凭证');
   END IF;
+END $$;
+SELECT set_config('role','postgres', true);
+
+
+-- ============================================================
+-- G0-CLOSURE-R1 用例（B-LINE / SOURCE PRECLOSURE FAILURE）
+-- ============================================================
+-- R1-1: 三个 issuer 函数 owner = membership_issuer_owner
+SELECT set_config('role','postgres', true);
+DO $$
+DECLARE v_bad text;
+BEGIN
+  SELECT string_agg(p.proname, ',') INTO v_bad
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname='public'
+     AND p.proname IN ('join_tenant_with_code','admin_assign_member_role','create_invitation')
+     AND pg_get_userbyid(p.proowner) <> 'membership_issuer_owner';
+  IF v_bad IS NOT NULL THEN
+    INSERT INTO g0z_results VALUES ('R1-1','FAIL','owner 不符: '||v_bad);
+  ELSE
+    INSERT INTO g0z_results VALUES ('R1-1','PASS','三函数 owner = membership_issuer_owner');
+  END IF;
+END $$;
+
+-- R1-2: convert_guest_to_tenant_admin 已退休（不存在）
+DO $$
+BEGIN
+  IF to_regprocedure('public.convert_guest_to_tenant_admin(uuid, uuid)') IS NULL THEN
+    INSERT INTO g0z_results VALUES ('R1-2','PASS','legacy 后门发行人已 DROP');
+  ELSE
+    INSERT INTO g0z_results VALUES ('R1-2','FAIL','convert_guest_to_tenant_admin 仍存在');
+  END IF;
+END $$;
+
+-- R1-2b: 全部 public DEFINER 函数固定 search_path（= H4 合同）
+DO $$
+DECLARE v_bad text;
+BEGIN
+  SELECT string_agg(p.proname, ',') INTO v_bad
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname='public' AND p.prosecdef
+     AND (p.proconfig IS NULL OR NOT EXISTS (
+           SELECT 1 FROM unnest(p.proconfig) c WHERE c ILIKE 'search_path=%'));
+  IF v_bad IS NOT NULL THEN
+    INSERT INTO g0z_results VALUES ('R1-2b','FAIL','未固定 search_path: '||v_bad);
+  ELSE
+    INSERT INTO g0z_results VALUES ('R1-2b','PASS','全部 DEFINER 函数已固定 search_path');
+  END IF;
+END $$;
+
+-- R1-3: handle_new_user 不再含 first-user super_admin 分支
+DO $$
+DECLARE v_src text;
+BEGIN
+  SELECT p.prosrc INTO v_src FROM pg_proc p
+   JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname='public' AND p.proname='handle_new_user';
+  IF v_src IS NULL THEN
+    INSERT INTO g0z_results VALUES ('R1-3','FAIL','handle_new_user 不存在');
+  ELSIF v_src ILIKE '%super_admin%' THEN
+    INSERT INTO g0z_results VALUES ('R1-3','FAIL','仍含 super_admin 分支');
+  ELSE
+    INSERT INTO g0z_results VALUES ('R1-3','PASS','注册恒为非特权身份');
+  END IF;
+END $$;
+
+-- R1-4: Admin A + Store B 签发 = DENY；本租户 Store A = ALLOW
+SELECT set_config('role','authenticated', true);
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000002","role":"authenticated"}', true);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.create_invitation(1, now() + interval '1 day', '33333333-0000-0000-0000-0000000000b1'::uuid);
+  EXCEPTION WHEN OTHERS THEN
+    INSERT INTO g0z_results VALUES ('R1-4','PASS','跨租户 store 邀请被 DENY');
+    RETURN;
+  END;
+  INSERT INTO g0z_results VALUES ('R1-4','FAIL','tenant A + store B 邀请码签发成功');
+END $$;
+
+DO $$
+DECLARE r jsonb;
+BEGIN
+  SELECT public.create_invitation(1, now() + interval '1 day', '33333333-0000-0000-0000-0000000000a1'::uuid) INTO r;
+  IF r ?> 'code' THEN
+    INSERT INTO g0z_results VALUES ('R1-4b','PASS','本租户 store 邀请路径保留');
+  ELSE
+    INSERT INTO g0z_results VALUES ('R1-4b','FAIL','本租户签发被误伤');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  INSERT INTO g0z_results VALUES ('R1-4b','FAIL','本租户签发被误伤: '||SQLERRM);
 END $$;
 SELECT set_config('role','postgres', true);
 
