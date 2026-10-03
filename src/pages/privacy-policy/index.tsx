@@ -1,0 +1,239 @@
+/**
+ * 隐私政策页面
+ */
+
+import {ScrollView, Text, View} from '@tarojs/components'
+
+export default function PrivacyPolicy() {
+  return (
+    <View className="min-h-screen bg-gray-50">
+      <ScrollView scrollY className="box-border" style={{height: '100vh', background: 'transparent'}}>
+        <View className="p-4">
+          {/* 标题 */}
+          <View className="mb-6">
+            <Text className="text-2xl font-bold text-foreground text-center block">隐私政策</Text>
+            <Text className="text-sm text-muted-foreground text-center mt-2 block">更新日期：2025年11月6日</Text>
+            <Text className="text-sm text-muted-foreground text-center block">生效日期：2025年11月6日</Text>
+          </View>
+
+          {/* 政策内容 */}
+          <View className="bg-white rounded-xl p-4 border-2 border-gray-200 shadow-sm space-y-4">
+            {/* 引言 */}
+            <View>
+              <Text className="text-base text-foreground leading-relaxed">
+                miaoda-team（以下简称"我们"）非常重视用户的隐私保护。本隐私政策旨在向您说明我们如何收集、使用、存储、共享和保护您的个人信息。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                请您在使用餐时间工作旅程系统（以下简称"本系统"）之前，仔细阅读并充分理解本隐私政策。如果您不同意本隐私政策的任何内容，请不要使用本系统。
+              </Text>
+            </View>
+
+            {/* 第一条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">一、我们收集的信息</Text>
+              <Text className="text-base text-foreground leading-relaxed">
+                1.1 为了向您提供服务，我们可能会收集以下信息：
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                （1）账号信息：手机号码、微信授权信息（微信昵称、头像等）；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （2）个人基本信息：姓名、性别、出生日期、身份证号、学历、工作经验等；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （3）工作信息：部门、岗位、职级、入职日期、工作时长、薪资信息等；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （4）考勤信息：打卡时间、打卡地点、班次信息、请假记录、加班记录等；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （5）绩效信息：绩效评分、绩效评价、培训记录、晋升记录等；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （6）设备信息：设备型号、操作系统版本、设备标识符、IP地址等；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （7）日志信息：使用时间、访问页面、操作记录等。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                1.2 我们仅收集为您提供服务所必需的信息，不会收集与服务无关的个人信息。
+              </Text>
+            </View>
+
+            {/* 第二条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">二、我们如何使用信息</Text>
+              <Text className="text-base text-foreground leading-relaxed">2.1 我们使用收集的信息用于以下目的：</Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                （1）为您提供本系统的各项功能和服务；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （2）验证您的身份，保障账号安全；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （3）改进和优化我们的产品和服务；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （4）进行数据分析和统计，以便更好地了解用户需求；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （5）向您发送服务通知、系统消息等；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （6）保护我们和用户的合法权益，防止欺诈、违法行为；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （7）履行法律法规规定的义务。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                2.2 我们不会将您的个人信息用于本隐私政策未载明的其他用途。
+              </Text>
+            </View>
+
+            {/* 第三条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">三、信息的存储</Text>
+              <Text className="text-base text-foreground leading-relaxed">
+                3.1 我们会将您的个人信息存储在中华人民共和国境内的服务器上。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                3.2 我们会采取合理的技术和管理措施保护您的个人信息安全，包括但不限于：
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                （1）使用加密技术保护数据传输和存储安全；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （2）建立严格的数据访问权限控制机制；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （3）定期进行安全审计和漏洞扫描；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （4）建立应急响应机制，及时处理安全事件。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                3.3
+                我们会在实现信息收集目的所必需的期限内保留您的个人信息。当您注销账号或法律法规规定的保存期限届满后，我们会删除或匿名化处理您的个人信息。
+              </Text>
+            </View>
+
+            {/* 第四条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">四、信息的共享、转让和公开披露</Text>
+              <Text className="text-base text-foreground leading-relaxed">
+                4.1 我们不会与第三方共享、转让或公开披露您的个人信息，除非：
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                （1）事先获得您的明确同意或授权；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （2）根据法律法规的规定或行政、司法机关的要求；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （3）为维护我们或其他用户的合法权益所必需；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （4）与我们的关联公司共享，但我们会要求关联公司遵守本隐私政策；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （5）与授权合作伙伴共享，但我们会与其签订严格的保密协议。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                4.2 如发生合并、收购、资产转让等情况，我们会要求新的持有您个人信息的公司继续受本隐私政策的约束。
+              </Text>
+            </View>
+
+            {/* 第五条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">五、您的权利</Text>
+              <Text className="text-base text-foreground leading-relaxed">5.1 您对自己的个人信息享有以下权利：</Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                （1）访问权：您有权访问您的个人信息；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （2）更正权：您有权更正不准确或不完整的个人信息；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （3）删除权：在特定情况下，您有权要求我们删除您的个人信息；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （4）撤回同意权：您有权撤回之前给予我们的授权同意；
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                （5）注销账号权：您有权注销您的账号。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                5.2 如需行使上述权利，请通过系统内反馈功能联系我们，我们会在15个工作日内予以回复。
+              </Text>
+            </View>
+
+            {/* 第六条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">六、未成年人保护</Text>
+              <Text className="text-base text-foreground leading-relaxed">
+                6.1
+                本系统主要面向成年人提供服务。如果您是未成年人，请在监护人的陪同下阅读本隐私政策，并在监护人同意的情况下使用本系统。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                6.2 如果我们发现在未事先获得监护人同意的情况下收集了未成年人的个人信息，我们会尽快删除相关信息。
+              </Text>
+            </View>
+
+            {/* 第七条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">七、第三方服务</Text>
+              <Text className="text-base text-foreground leading-relaxed">
+                7.1 本系统可能包含第三方服务或链接，这些第三方服务有自己的隐私政策，我们不对其隐私保护措施负责。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                7.2 我们建议您在使用第三方服务前，仔细阅读其隐私政策。
+              </Text>
+            </View>
+
+            {/* 第八条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">八、隐私政策的变更</Text>
+              <Text className="text-base text-foreground leading-relaxed">
+                8.1 我们可能会根据业务发展需要或法律法规要求更新本隐私政策。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                8.2 更新后的隐私政策将在本系统上公布，并自公布之日起生效。
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                8.3 如果您不同意更新后的隐私政策，可以停止使用本系统；如果您继续使用本系统，视为接受更新后的隐私政策。
+              </Text>
+            </View>
+
+            {/* 第九条 */}
+            <View>
+              <Text className="text-lg font-semibold text-foreground mb-2 block">九、联系我们</Text>
+              <Text className="text-base text-foreground leading-relaxed">
+                如您对本隐私政策有任何疑问、意见或建议，或需要行使您的权利，请通过以下方式联系我们：
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">运营方：miaoda-team</Text>
+              <Text className="text-base text-foreground leading-relaxed mt-1 block">
+                联系方式：通过系统内反馈功能联系
+              </Text>
+              <Text className="text-base text-foreground leading-relaxed mt-2 block">
+                我们会在收到您的请求后15个工作日内予以回复。
+              </Text>
+            </View>
+
+            {/* 结束语 */}
+            <View className="mt-6 pt-4 border-t border-border">
+              <Text className="text-base text-foreground leading-relaxed text-center">
+                感谢您信任并使用餐时间工作旅程系统！
+              </Text>
+              <Text className="text-sm text-muted-foreground text-center mt-2 block">
+                我们将持续努力保护您的隐私安全
+              </Text>
+            </View>
+          </View>
+
+          {/* 底部占位 */}
+          <View className="h-4" />
+        </View>
+      </ScrollView>
+    </View>
+  )
+}

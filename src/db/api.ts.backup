@@ -1,0 +1,3693 @@
+import Taro from '@tarojs/taro'
+import {supabase} from '@/client/supabase'
+import type {
+  Brand,
+  CostData,
+  DailyOperation,
+  DayOffRecord,
+  EfficiencyStandard,
+  Employee,
+  MealPeriod,
+  OperationsData,
+  PartTimeRecord,
+  PartTimeShift,
+  PositionConfig,
+  Profile,
+  Schedule,
+  ScheduleLog,
+  SchedulePlan,
+  SchedulePlanPeriod,
+  ScheduleResult,
+  Store,
+  Tenant,
+  UserRole,
+  WorkShift
+} from './types'
+
+// ==================== 租户相关 API ====================
+
+export async function getTenants(): Promise<Tenant[]> {
+  const {data, error} = await supabase.from('tenants').select('*').order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取租户列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getTenantById(id: string): Promise<Tenant | null> {
+  const {data, error} = await supabase.from('tenants').select('*').eq('id', id).maybeSingle()
+
+  if (error) {
+    console.error('获取租户详情失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function createTenant(tenant: Partial<Tenant>): Promise<Tenant | null> {
+  const {data, error} = await supabase
+    .from('tenants')
+    .insert({
+      name: tenant.name || '',
+      industry: tenant.industry,
+      package_type: tenant.package_type || 'basic',
+      status: tenant.status || 'active',
+      admin_phone: tenant.admin_phone // 添加管理员电话
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('创建租户失败:', error)
+    return null
+  }
+  return data
+}
+
+// 创建租户并设置管理员（用于平台授权登录）
+// 新方案：调用 Edge Function，使用 service_role_key 绕过 RLS 策略
+export async function createTenantWithAdmin(
+  userId: string,
+  phone: string
+): Promise<{success: boolean; isNewTenant: boolean; message?: string}> {
+  try {
+    console.log('=== createTenantWithAdmin 开始（调用 Edge Function）===', {
+      userId,
+      phone
+    })
+
+    // 获取 Supabase URL
+    const supabaseUrl = process.env.TARO_APP_SUPABASE_URL
+
+    if (!supabaseUrl) {
+      console.error('Supabase URL 未配置')
+      return {
+        success: false,
+        isNewTenant: false,
+        message: '系统配置错误'
+      }
+    }
+
+    // 调用 Edge Function
+    const functionUrl = `${supabaseUrl}/functions/v1/create-tenant-with-admin`
+    console.log('调用 Edge Function:', functionUrl)
+
+    const response = await fetch(functionUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.TARO_APP_SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({
+        userId,
+        phone
+      })
+    })
+
+    console.log('Edge Function 响应状态:', response.status)
+
+    const result = await response.json()
+    console.log('Edge Function 响应结果:', result)
+
+    if (!response.ok) {
+      console.error('Edge Function 调用失败:', result)
+      return {
+        success: false,
+        isNewTenant: false,
+        message: result.message || '创建租户失败'
+      }
+    }
+
+    console.log('=== createTenantWithAdmin 完成 ===')
+
+    return {
+      success: result.success,
+      isNewTenant: result.isNewTenant,
+      message: result.message
+    }
+  } catch (error) {
+    console.error('createTenantWithAdmin 异常:', error)
+    return {
+      success: false,
+      isNewTenant: false,
+      message: '网络错误，请重试'
+    }
+  }
+}
+
+export async function updateTenant(id: string, updates: Partial<Tenant>): Promise<boolean> {
+  const {error} = await supabase
+    .from('tenants')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+
+  if (error) {
+    console.error('更新租户失败:', error)
+    return false
+  }
+  return true
+}
+
+export async function deleteTenant(id: string): Promise<boolean> {
+  const {error} = await supabase.from('tenants').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除租户失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 用户相关 API ====================
+
+export async function getCurrentUser(): Promise<Profile | null> {
+  const {
+    data: {user}
+  } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const {data, error} = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
+
+  if (error) {
+    console.error('获取当前用户失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function getProfileByUserId(userId: string): Promise<Profile | null> {
+  const {data, error} = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
+
+  if (error) {
+    console.error('获取用户 profile 失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function getUsersByTenantId(tenantId: string): Promise<Profile[]> {
+  const {data, error} = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取租户用户列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getAllProfiles(): Promise<Profile[]> {
+  const {data, error} = await supabase.from('profiles').select('*').order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取所有用户列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function updateUserStatus(userId: string, status: string): Promise<boolean> {
+  const {error} = await supabase
+    .from('profiles')
+    .update({
+      status,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', userId)
+
+  if (error) {
+    console.error('更新用户状态失败:', error)
+    return false
+  }
+  return true
+}
+
+// 删除用户（同时删除关联的员工记录）
+export async function deleteUser(userId: string): Promise<boolean> {
+  try {
+    // 先删除关联的员工记录
+    const {error: employeeError} = await supabase.from('employees').delete().eq('user_id', userId)
+
+    if (employeeError) {
+      console.error('删除员工记录失败:', employeeError)
+      return false
+    }
+
+    // 再删除用户记录
+    const {error: profileError} = await supabase.from('profiles').delete().eq('id', userId)
+
+    if (profileError) {
+      console.error('删除用户失败:', profileError)
+      return false
+    }
+
+    return true
+  } catch (error) {
+    console.error('删除用户失败:', error)
+    return false
+  }
+}
+
+export async function updateUserProfile(id: string, updates: Partial<Profile>): Promise<boolean> {
+  const {error} = await supabase
+    .from('profiles')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+
+  if (error) {
+    console.error('更新用户信息失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 店铺相关 API ====================
+
+export async function getStoresByTenantId(tenantId: string): Promise<Store[]> {
+  const {data, error} = await supabase
+    .from('stores')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取店铺列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getStoreById(id: string): Promise<Store | null> {
+  const {data, error} = await supabase.from('stores').select('*').eq('id', id).maybeSingle()
+
+  if (error) {
+    console.error('获取店铺详情失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function createStore(store: Partial<Store>): Promise<Store | null> {
+  const {data, error} = await supabase
+    .from('stores')
+    .insert({
+      tenant_id: store.tenant_id || '',
+      name: store.name || '',
+      address: store.address,
+      manager_id: store.manager_id,
+      status: store.status || 'active'
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('创建店铺失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function updateStore(id: string, updates: Partial<Store>): Promise<boolean> {
+  const {error} = await supabase
+    .from('stores')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+
+  if (error) {
+    console.error('更新店铺失败:', error)
+    return false
+  }
+  return true
+}
+
+export async function deleteStore(id: string): Promise<boolean> {
+  const {error} = await supabase.from('stores').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除店铺失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 员工相关 API ====================
+
+export async function getEmployeesByTenantId(tenantId: string): Promise<Employee[]> {
+  const {data, error} = await supabase
+    .from('employees')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取员工列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getEmployeesByStoreId(storeId: string): Promise<Employee[]> {
+  const {data, error} = await supabase
+    .from('employees')
+    .select('*')
+    .eq('store_id', storeId)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取店铺员工列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getEmployeeById(id: string): Promise<Employee | null> {
+  const {data, error} = await supabase.from('employees').select('*').eq('id', id).maybeSingle()
+
+  if (error) {
+    console.error('获取员工详情失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 根据用户ID获取员工信息
+ */
+export async function getEmployeeByUserId(userId: string): Promise<Employee | null> {
+  const {data, error} = await supabase.from('employees').select('*').eq('user_id', userId).maybeSingle()
+
+  if (error) {
+    console.error('根据用户ID获取员工信息失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function createEmployee(employee: Partial<Employee>): Promise<Employee | null> {
+  console.log('=== createEmployee API 调用 ===')
+  console.log('接收到的员工数据:', employee)
+
+  // 验证必需字段
+  if (!employee.tenant_id) {
+    console.error('❌ tenant_id 缺失')
+    return null
+  }
+  if (!employee.store_id) {
+    console.error('❌ store_id 缺失')
+    return null
+  }
+  if (!employee.name) {
+    console.error('❌ name 缺失')
+    return null
+  }
+
+  const insertData = {
+    tenant_id: employee.tenant_id,
+    store_id: employee.store_id,
+    brand_id: employee.brand_id || null, // 添加brand_id字段
+    user_id: employee.user_id,
+    name: employee.name,
+    phone: employee.phone,
+    employee_type: employee.employee_type || 'full_time',
+    department: employee.department || 'front_hall',
+    position: employee.position,
+    status: employee.status || 'active',
+    monthly_salary: employee.monthly_salary,
+    daily_work_hours: employee.daily_work_hours,
+    is_core_position: employee.is_core_position || false,
+    position_fixed_backup: employee.position_fixed_backup || false,
+    can_backup_positions: employee.can_backup_positions || []
+  }
+
+  console.log('准备插入的数据:', insertData)
+
+  const {data, error} = await supabase.from('employees').insert(insertData).select().maybeSingle()
+
+  if (error) {
+    console.error('❌ 创建员工失败，详细错误:', error)
+    console.error('错误代码:', error.code)
+    console.error('错误消息:', error.message)
+    console.error('错误详情:', error.details)
+    return null
+  }
+
+  console.log('✅ 创建员工成功:', data)
+  return data
+}
+
+export async function updateEmployee(id: string, updates: Partial<Employee>): Promise<boolean> {
+  console.log('更新员工，ID:', id)
+  console.log('更新数据:', updates)
+
+  const {data, error} = await supabase
+    .from('employees')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select()
+
+  if (error) {
+    console.error('更新员工失败，错误详情:', error)
+    console.error('错误代码:', error.code)
+    console.error('错误消息:', error.message)
+    console.error('错误详情:', error.details)
+    return false
+  }
+
+  console.log('更新成功，返回数据:', data)
+  return true
+}
+
+export async function deleteEmployee(id: string): Promise<boolean> {
+  const {error} = await supabase.from('employees').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除员工失败:', error)
+    return false
+  }
+  return true
+}
+
+// 批量导入员工
+export interface BatchImportEmployeeData {
+  name: string
+  phone: string
+  storeName: string
+  employeeType: '正式' | '兼职'
+  notes?: string
+}
+
+export interface BatchImportResult {
+  success: number
+  failed: number
+  errors: string[]
+}
+
+export async function batchImportEmployees(
+  tenantId: string,
+  employees: BatchImportEmployeeData[]
+): Promise<BatchImportResult> {
+  const result: BatchImportResult = {
+    success: 0,
+    failed: 0,
+    errors: []
+  }
+
+  // 获取租户的所有店铺
+  const stores = await getStoresByTenantId(tenantId)
+  const storeMap = new Map(stores.map((s) => [s.name, s.id]))
+
+  // 记录已处理的手机号，避免重复
+  const processedPhones = new Set<string>()
+
+  for (let i = 0; i < employees.length; i++) {
+    const emp = employees[i]
+    const rowNum = i + 2 // Excel行号从2开始
+
+    try {
+      // 检查手机号是否重复
+      if (processedPhones.has(emp.phone)) {
+        result.failed++
+        result.errors.push(`第${rowNum}行：手机号${emp.phone}重复`)
+        continue
+      }
+
+      // 检查店铺是否存在
+      const storeId = storeMap.get(emp.storeName)
+      if (!storeId) {
+        result.failed++
+        result.errors.push(`第${rowNum}行：店铺"${emp.storeName}"不存在`)
+        continue
+      }
+
+      // 检查手机号是否已存在于数据库
+      const {data: existingEmployee} = await supabase
+        .from('employees')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .eq('phone', emp.phone)
+        .maybeSingle()
+
+      if (existingEmployee) {
+        result.failed++
+        result.errors.push(`第${rowNum}行：手机号${emp.phone}已存在`)
+        continue
+      }
+
+      // 创建员工
+      const employeeData: Partial<Employee> = {
+        tenant_id: tenantId,
+        store_id: storeId,
+        name: emp.name,
+        phone: emp.phone,
+        employee_type: emp.employeeType === '正式' ? 'full_time' : 'part_time',
+        department: 'front_hall',
+        status: 'active'
+      }
+
+      const created = await createEmployee(employeeData)
+      if (created) {
+        result.success++
+        processedPhones.add(emp.phone)
+      } else {
+        result.failed++
+        result.errors.push(`第${rowNum}行：创建员工失败`)
+      }
+    } catch (error) {
+      result.failed++
+      result.errors.push(`第${rowNum}行：${error instanceof Error ? error.message : '未知错误'}`)
+    }
+  }
+
+  return result
+}
+
+// ==================== 排班相关 API ====================
+
+export async function getSchedulesByTenantId(
+  tenantId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<Schedule[]> {
+  let query = supabase.from('schedules').select('*').eq('tenant_id', tenantId)
+
+  if (startDate) {
+    query = query.gte('schedule_date', startDate)
+  }
+  if (endDate) {
+    query = query.lte('schedule_date', endDate)
+  }
+
+  const {data, error} = await query.order('schedule_date', {ascending: false})
+
+  if (error) {
+    console.error('获取排班列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getSchedulesByStoreId(
+  storeId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<Schedule[]> {
+  let query = supabase.from('schedules').select('*').eq('store_id', storeId)
+
+  if (startDate) {
+    query = query.gte('schedule_date', startDate)
+  }
+  if (endDate) {
+    query = query.lte('schedule_date', endDate)
+  }
+
+  const {data, error} = await query.order('schedule_date', {ascending: false})
+
+  if (error) {
+    console.error('获取店铺排班列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getScheduleById(id: string): Promise<Schedule | null> {
+  const {data, error} = await supabase.from('schedules').select('*').eq('id', id).maybeSingle()
+
+  if (error) {
+    console.error('获取排班详情失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function createSchedule(schedule: Partial<Schedule>): Promise<Schedule | null> {
+  console.log('=== createSchedule 开始 ===')
+  console.log('输入数据:', schedule)
+
+  const {
+    data: {user}
+  } = await supabase.auth.getUser()
+
+  const {data, error} = await supabase
+    .from('schedules')
+    .insert({
+      tenant_id: schedule.tenant_id || '',
+      store_id: schedule.store_id || '',
+      employee_id: schedule.employee_id || '',
+      schedule_date: schedule.schedule_date || '',
+      shift_type: schedule.shift_type,
+      start_time: schedule.start_time,
+      end_time: schedule.end_time,
+      status: schedule.status || 'pending',
+      notes: schedule.notes,
+      created_by: user?.id
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('创建排班失败:', error)
+    console.error('错误详情:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    return null
+  }
+
+  console.log('=== createSchedule 成功 ===')
+  console.log('返回数据:', data)
+  return data
+}
+
+/**
+ * 创建排休记录
+ * @param dayOff 排休记录数据
+ * @returns 创建的排休记录
+ */
+export async function createDayOffSchedule(dayOff: {
+  tenant_id: string
+  store_id: string
+  employee_id: string
+  schedule_date: string
+  meal_period: 'all_day' | 'breakfast' | 'lunch' | 'dinner'
+  rest_hours: number
+  notes?: string
+}): Promise<Schedule | null> {
+  console.log('=== createDayOffSchedule 开始 ===')
+  console.log('输入数据:', dayOff)
+
+  const {
+    data: {user}
+  } = await supabase.auth.getUser()
+
+  const {data, error} = await supabase
+    .from('schedules')
+    .insert({
+      tenant_id: dayOff.tenant_id,
+      store_id: dayOff.store_id,
+      employee_id: dayOff.employee_id,
+      schedule_date: dayOff.schedule_date,
+      is_day_off: true, // 标记为排休记录
+      meal_period: dayOff.meal_period,
+      rest_hours: dayOff.rest_hours,
+      status: 'approved', // 排休记录直接批准
+      notes: dayOff.notes || '快速排休',
+      created_by: user?.id
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('创建排休记录失败:', error)
+    console.error('错误详情:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    return null
+  }
+
+  console.log('=== createDayOffSchedule 成功 ===')
+  console.log('返回数据:', data)
+  return data
+}
+
+/**
+ * 获取指定日期的排休记录
+ * @param tenantId 租户ID
+ * @param storeId 店铺ID
+ * @param scheduleDate 日期
+ * @returns 排休记录列表
+ */
+export async function getDayOffSchedules(tenantId: string, storeId: string, scheduleDate: string): Promise<Schedule[]> {
+  const {data, error} = await supabase
+    .from('schedules')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .eq('schedule_date', scheduleDate)
+    .eq('is_day_off', true)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取排休记录失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 删除排休记录
+ * @param id 排休记录ID
+ * @returns 是否删除成功
+ */
+export async function deleteDayOffSchedule(id: string): Promise<boolean> {
+  const {error} = await supabase.from('schedules').delete().eq('id', id).eq('is_day_off', true)
+
+  if (error) {
+    console.error('删除排休记录失败:', error)
+    return false
+  }
+  return true
+}
+
+export async function updateSchedule(id: string, updates: Partial<Schedule>): Promise<boolean> {
+  const {error} = await supabase
+    .from('schedules')
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id)
+
+  if (error) {
+    console.error('更新排班失败:', error)
+    return false
+  }
+  return true
+}
+
+export async function deleteSchedule(id: string): Promise<boolean> {
+  const {error} = await supabase.from('schedules').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除排班失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 排班日志相关 API ====================
+
+export async function getScheduleLogsByTenantId(
+  tenantId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<ScheduleLog[]> {
+  let query = supabase.from('schedule_logs').select('*').eq('tenant_id', tenantId)
+
+  if (startDate) {
+    query = query.gte('log_date', startDate)
+  }
+  if (endDate) {
+    query = query.lte('log_date', endDate)
+  }
+
+  const {data, error} = await query.order('log_date', {ascending: false})
+
+  if (error) {
+    console.error('获取排班日志失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+// 获取单个排班日志
+export async function getScheduleLogById(id: string): Promise<ScheduleLog | null> {
+  const {data, error} = await supabase.from('schedule_logs').select('*').eq('id', id).maybeSingle()
+
+  if (error) {
+    console.error('获取排班日志失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function createScheduleLog(log: Partial<ScheduleLog>): Promise<ScheduleLog | null> {
+  console.log('=== createScheduleLog 开始 ===')
+  console.log('输入数据:', log)
+
+  const {data, error} = await supabase
+    .from('schedule_logs')
+    .insert({
+      tenant_id: log.tenant_id || '',
+      schedule_id: log.schedule_id || '',
+      employee_id: log.employee_id || '',
+      store_id: log.store_id || '',
+      log_date: log.log_date || '',
+      completion_status: log.completion_status,
+      completion_time: log.completion_time,
+      score: log.score,
+      duration_minutes: log.duration_minutes,
+      notes: log.notes
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('创建排班日志失败:', error)
+    console.error('错误详情:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    return null
+  }
+
+  console.log('=== createScheduleLog 成功 ===')
+  console.log('返回数据:', data)
+  return data
+}
+
+export async function getScheduleLogsRanking(
+  tenantId: string,
+  startDate: string,
+  endDate: string
+): Promise<
+  Array<{
+    employee_id: string
+    employee_name: string
+    total_logs: number
+    excellent_count: number
+    avg_score: number
+  }>
+> {
+  const {data, error} = await supabase
+    .from('schedule_logs')
+    .select(
+      `
+      employee_id,
+      employees!inner(name),
+      completion_status,
+      score
+    `
+    )
+    .eq('tenant_id', tenantId)
+    .gte('log_date', startDate)
+    .lte('log_date', endDate)
+
+  if (error) {
+    console.error('获取排行榜数据失败:', error)
+    return []
+  }
+
+  if (!data || data.length === 0) {
+    return []
+  }
+
+  // 按员工分组统计
+  const employeeStats = new Map<
+    string,
+    {
+      employee_id: string
+      employee_name: string
+      total_logs: number
+      excellent_count: number
+      total_score: number
+      score_count: number
+    }
+  >()
+
+  for (const log of data) {
+    const employeeId = log.employee_id
+    const employeeName = (log.employees as any)?.name || '未知员工'
+
+    if (!employeeStats.has(employeeId)) {
+      employeeStats.set(employeeId, {
+        employee_id: employeeId,
+        employee_name: employeeName,
+        total_logs: 0,
+        excellent_count: 0,
+        total_score: 0,
+        score_count: 0
+      })
+    }
+
+    const stats = employeeStats.get(employeeId)!
+    stats.total_logs++
+
+    if (log.completion_status === 'excellent') {
+      stats.excellent_count++
+    }
+
+    if (log.score !== null) {
+      stats.total_score += log.score
+      stats.score_count++
+    }
+  }
+
+  // 转换为数组并计算平均分
+  const ranking = Array.from(employeeStats.values()).map((stats) => ({
+    employee_id: stats.employee_id,
+    employee_name: stats.employee_name,
+    total_logs: stats.total_logs,
+    excellent_count: stats.excellent_count,
+    avg_score: stats.score_count > 0 ? Math.round((stats.total_score / stats.score_count) * 10) / 10 : 0
+  }))
+
+  // 按优秀数量和平均分排序
+  ranking.sort((a, b) => {
+    if (b.excellent_count !== a.excellent_count) {
+      return b.excellent_count - a.excellent_count
+    }
+    return b.avg_score - a.avg_score
+  })
+
+  return ranking
+}
+
+// 更新排班日志
+export async function updateScheduleLog(id: string, updates: Partial<ScheduleLog>): Promise<ScheduleLog | null> {
+  const {data, error} = await supabase
+    .from('schedule_logs')
+    .update({
+      schedule_id: updates.schedule_id,
+      employee_id: updates.employee_id,
+      store_id: updates.store_id,
+      log_date: updates.log_date,
+      completion_status: updates.completion_status,
+      completion_time: updates.completion_time,
+      score: updates.score,
+      duration_minutes: updates.duration_minutes,
+      notes: updates.notes
+    })
+    .eq('id', id)
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('更新排班日志失败:', error)
+    return null
+  }
+  return data
+}
+
+// 删除排班日志
+export async function deleteScheduleLog(id: string): Promise<boolean> {
+  const {error} = await supabase.from('schedule_logs').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除排班日志失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 运营数据相关 API ====================
+
+export async function getOperationsDataByTenantId(
+  tenantId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<OperationsData[]> {
+  let query = supabase.from('operations_data').select('*').eq('tenant_id', tenantId)
+
+  if (startDate) {
+    query = query.gte('data_date', startDate)
+  }
+  if (endDate) {
+    query = query.lte('data_date', endDate)
+  }
+
+  const {data, error} = await query.order('data_date', {ascending: false})
+
+  if (error) {
+    console.error('获取运营数据失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function getTodayOperationsData(tenantId: string): Promise<OperationsData | null> {
+  const today = new Date().toISOString().split('T')[0]
+
+  const {data, error} = await supabase
+    .from('operations_data')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('data_date', today)
+    .is('store_id', null)
+    .maybeSingle()
+
+  if (error) {
+    console.error('获取今日运营数据失败:', error)
+    return null
+  }
+  return data
+}
+
+export async function getMonthOperationsData(tenantId: string, year: number, month: number): Promise<OperationsData[]> {
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`
+  const endDate = new Date(year, month, 0).toISOString().split('T')[0]
+
+  return getOperationsDataByTenantId(tenantId, startDate, endDate)
+}
+
+export async function upsertOperationsData(data: Partial<OperationsData>): Promise<boolean> {
+  const {error} = await supabase.from('operations_data').upsert(
+    {
+      tenant_id: data.tenant_id || '',
+      store_id: data.store_id,
+      data_date: data.data_date || '',
+      total_schedules: data.total_schedules || 0,
+      completed_schedules: data.completed_schedules || 0,
+      excellent_schedules: data.excellent_schedules || 0,
+      delayed_schedules: data.delayed_schedules || 0,
+      avg_duration_minutes: data.avg_duration_minutes || 0,
+      participation_count: data.participation_count || 0,
+      updated_at: new Date().toISOString()
+    },
+    {
+      onConflict: 'tenant_id,store_id,data_date'
+    }
+  )
+
+  if (error) {
+    console.error('更新运营数据失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 成本数据相关 API ====================
+
+export async function getCostDataByTenantId(
+  tenantId: string,
+  startDate?: string,
+  endDate?: string
+): Promise<CostData[]> {
+  let query = supabase.from('cost_data').select('*').eq('tenant_id', tenantId)
+
+  if (startDate) {
+    query = query.gte('data_date', startDate)
+  }
+  if (endDate) {
+    query = query.lte('data_date', endDate)
+  }
+
+  const {data, error} = await query.order('data_date', {ascending: false})
+
+  if (error) {
+    console.error('获取成本数据失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+export async function upsertCostData(data: Partial<CostData>): Promise<boolean> {
+  const {error} = await supabase.from('cost_data').upsert(
+    {
+      tenant_id: data.tenant_id || '',
+      store_id: data.store_id,
+      data_date: data.data_date || '',
+      revenue: data.revenue,
+      labor_cost: data.labor_cost,
+      labor_cost_ratio: data.labor_cost_ratio,
+      employee_count: data.employee_count,
+      avg_efficiency: data.avg_efficiency,
+      updated_at: new Date().toISOString()
+    },
+    {
+      onConflict: 'tenant_id,store_id,data_date'
+    }
+  )
+
+  if (error) {
+    console.error('更新成本数据失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 效能标准配置相关 API ====================
+
+/**
+ * 获取租户的效能标准配置（默认配置）
+ */
+export async function getTenantEfficiencyStandard(tenantId: string) {
+  console.log('getTenantEfficiencyStandard: 查询租户级别配置', {tenantId})
+
+  const {data, error} = await supabase
+    .from('efficiency_standards')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .is('store_id', null)
+    .maybeSingle()
+
+  if (error) {
+    console.error('获取租户效能标准配置失败:', error)
+    return null
+  }
+
+  console.log('getTenantEfficiencyStandard: 查询结果', data)
+  return data
+}
+
+/**
+ * 获取店铺的效能标准配置
+ */
+export async function getStoreEfficiencyStandard(tenantId: string, storeId: string) {
+  console.log('getStoreEfficiencyStandard: 查询店铺级别配置', {tenantId, storeId})
+
+  const {data, error} = await supabase
+    .from('efficiency_standards')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('获取店铺效能标准配置失败:', error)
+    return null
+  }
+
+  console.log('getStoreEfficiencyStandard: 店铺级别查询结果', data)
+
+  // 如果店铺没有配置，返回租户默认配置
+  if (!data) {
+    console.log('getStoreEfficiencyStandard: 店铺无配置，尝试获取租户级别配置')
+    return getTenantEfficiencyStandard(tenantId)
+  }
+
+  return data
+}
+
+/**
+ * 创建或更新效能标准配置
+ */
+export async function upsertEfficiencyStandard(standard: Partial<EfficiencyStandard>) {
+  // 确保 store_id 为 null 而不是空字符串
+  const cleanedStandard = {
+    ...standard,
+    store_id: standard.store_id || null,
+    updated_at: new Date().toISOString()
+  }
+
+  console.log('准备保存效能标准配置:', cleanedStandard)
+
+  // 先查询是否已存在
+  let query = supabase.from('efficiency_standards').select('id').eq('tenant_id', cleanedStandard.tenant_id!)
+
+  if (cleanedStandard.store_id) {
+    query = query.eq('store_id', cleanedStandard.store_id)
+  } else {
+    query = query.is('store_id', null)
+  }
+
+  const {data: existing} = await query.maybeSingle()
+
+  console.log('查询已存在的配置:', existing)
+
+  let result
+  if (existing) {
+    // 更新现有记录
+    console.log('更新现有配置，ID:', existing.id)
+    const {data, error} = await supabase
+      .from('efficiency_standards')
+      .update(cleanedStandard)
+      .eq('id', existing.id)
+      .select()
+      .maybeSingle()
+
+    if (error) {
+      console.error('更新效能标准配置失败:', error)
+      console.error('错误详情:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      })
+      return null
+    }
+    result = data
+  } else {
+    // 插入新记录
+    console.log('插入新配置')
+    const {data, error} = await supabase.from('efficiency_standards').insert(cleanedStandard).select().maybeSingle()
+
+    if (error) {
+      console.error('插入效能标准配置失败:', error)
+      console.error('错误详情:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      })
+      return null
+    }
+    result = data
+  }
+
+  console.log('保存效能标准配置成功:', result)
+  return result
+}
+
+/**
+ * 根据营收计算所属区间和相关信息
+ */
+export function calculateRevenueZone(
+  revenue: number,
+  standard: EfficiencyStandard
+): {
+  zone: 'low' | 'normal' | 'high'
+  zoneName: string
+  efficiencyStandard: number
+  managementMotto: string
+  targetWorkHours: number
+  targetStaffCount: number // 新增：目标人数
+} {
+  let zone: 'low' | 'normal' | 'high'
+  let zoneName: string
+  let efficiencyStandard: number
+  let managementMotto: string
+
+  // 根据营收判断区间（含上不含下原则）
+  if (revenue < standard.low_revenue_max) {
+    zone = 'low'
+    zoneName = '低营收区'
+    efficiencyStandard = standard.low_efficiency_standard
+    managementMotto = standard.low_management_motto
+  } else if (revenue < standard.normal_revenue_max) {
+    zone = 'normal'
+    zoneName = '正常营收区'
+    efficiencyStandard = standard.normal_efficiency_standard
+    managementMotto = standard.normal_management_motto
+  } else {
+    zone = 'high'
+    zoneName = '高营收区'
+    efficiencyStandard = standard.high_efficiency_standard
+    managementMotto = standard.high_management_motto
+  }
+
+  // 计算目标人数（营收 / 效能标准）
+  const targetStaffCount = Number((revenue / efficiencyStandard).toFixed(2))
+
+  // 计算目标工时（目标人数 * 8小时）
+  const targetWorkHours = Number((targetStaffCount * 8).toFixed(1))
+
+  return {
+    zone,
+    zoneName,
+    efficiencyStandard,
+    managementMotto,
+    targetWorkHours,
+    targetStaffCount
+  }
+}
+
+/**
+ * 评估效能达成情况
+ */
+export function evaluateEfficiency(
+  actualRevenue: number,
+  actualWorkHours: number,
+  standard: EfficiencyStandard
+): {
+  perCapitaRevenue: number
+  zone: 'low' | 'normal' | 'high'
+  zoneName: string
+  efficiencyStandard: number
+  rating: '优秀' | '合格' | '未达标'
+  ratingIcon: string
+  ratingColor: string
+} {
+  // 计算人均营收
+  const perCapitaRevenue = Number((actualRevenue / actualWorkHours).toFixed(1))
+
+  // 确定所属区间
+  const zoneInfo = calculateRevenueZone(actualRevenue, standard)
+
+  // 评估效能
+  let rating: '优秀' | '合格' | '未达标'
+  let ratingIcon: string
+  let ratingColor: string
+
+  if (perCapitaRevenue >= zoneInfo.efficiencyStandard) {
+    rating = '优秀'
+    ratingIcon = '✅'
+    ratingColor = 'text-green-600'
+  } else if (perCapitaRevenue >= zoneInfo.efficiencyStandard * 0.9) {
+    rating = '合格'
+    ratingIcon = '⚠️'
+    ratingColor = 'text-yellow-600'
+  } else {
+    rating = '未达标'
+    ratingIcon = '❌'
+    ratingColor = 'text-red-600'
+  }
+
+  return {
+    perCapitaRevenue,
+    zone: zoneInfo.zone,
+    zoneName: zoneInfo.zoneName,
+    efficiencyStandard: zoneInfo.efficiencyStandard,
+    rating,
+    ratingIcon,
+    ratingColor
+  }
+}
+
+// ==================== 每日运营记录相关 API ====================
+
+/**
+ * 获取指定日期的运营记录
+ */
+export async function getDailyOperation(tenantId: string, storeId: string, operationDate: string) {
+  const {data, error} = await supabase
+    .from('daily_operations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .eq('operation_date', operationDate)
+    .maybeSingle()
+
+  if (error) {
+    console.error('获取每日运营记录失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 获取店铺的运营记录列表
+ */
+export async function getDailyOperations(tenantId: string, storeId?: string, startDate?: string, endDate?: string) {
+  let query = supabase
+    .from('daily_operations')
+    .select('*, store:stores(*)')
+    .eq('tenant_id', tenantId)
+    .order('operation_date', {ascending: false})
+
+  if (storeId) {
+    query = query.eq('store_id', storeId)
+  }
+
+  if (startDate) {
+    query = query.gte('operation_date', startDate)
+  }
+
+  if (endDate) {
+    query = query.lte('operation_date', endDate)
+  }
+
+  const {data, error} = await supabase
+    .from('daily_operations')
+    .select('*, store:stores(*)')
+    .eq('tenant_id', tenantId)
+    .order('operation_date', {ascending: false})
+
+  if (error) {
+    console.error('获取每日运营记录列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 创建或更新每日运营记录
+ */
+export async function upsertDailyOperation(operation: Partial<DailyOperation>) {
+  const {data, error} = await supabase
+    .from('daily_operations')
+    .upsert(
+      {
+        ...operation,
+        updated_at: new Date().toISOString()
+      },
+      {
+        onConflict: 'tenant_id,store_id,operation_date'
+      }
+    )
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('保存每日运营记录失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 删除每日运营记录
+ */
+export async function deleteDailyOperation(id: string) {
+  const {error} = await supabase.from('daily_operations').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除每日运营记录失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 排班规划系统 API ====================
+
+/**
+ * 获取租户配置
+ */
+export async function getTenantSettings(tenantId: string) {
+  console.log('获取租户配置:', tenantId)
+
+  const {data, error} = await supabase.from('tenant_settings').select('*').eq('tenant_id', tenantId).maybeSingle()
+
+  if (error) {
+    console.error('获取租户配置失败:', error)
+    return null
+  }
+
+  console.log('租户配置:', data)
+  return data
+}
+
+/**
+ * 更新租户配置
+ */
+export async function upsertTenantSettings(settings: {
+  tenant_id: string
+  default_daily_work_hours: number
+  default_monthly_work_days?: number
+  default_part_time_hourly_rate?: number
+  cost_warning_threshold?: number
+  efficiency_warning_threshold?: number
+  brand_name?: string | null
+  industry?: string | null
+  contact_person?: string | null
+  contact_phone?: string | null
+  contact_email?: string | null
+  logo_url?: string | null
+  description?: string | null
+}) {
+  console.log('=== upsertTenantSettings 开始 ===')
+  console.log('更新租户配置:', settings)
+
+  // 获取当前用户信息用于调试
+  const {data: currentUser} = await supabase.auth.getUser()
+  console.log('当前认证用户:', currentUser?.user?.id)
+
+  // 获取当前用户的 profile 信息
+  const {data: profile, error: profileError} = await supabase
+    .from('profiles')
+    .select('id, tenant_id, role')
+    .eq('id', currentUser?.user?.id || '')
+    .maybeSingle()
+
+  console.log('当前用户 profile:', profile, '错误:', profileError)
+
+  const {data, error} = await supabase
+    .from('tenant_settings')
+    .upsert(
+      {
+        ...settings,
+        updated_at: new Date().toISOString()
+      },
+      {
+        onConflict: 'tenant_id'
+      }
+    )
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('更新租户配置失败:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    return null
+  }
+
+  console.log('租户配置更新成功:', data)
+  console.log('=== upsertTenantSettings 完成 ===')
+  return data
+}
+
+// ==================== 排班规划系统 API ====================
+
+/**
+ * 创建或更新排班计划
+ */
+export async function upsertSchedulePlan(plan: Partial<SchedulePlan>) {
+  const {data, error} = await supabase
+    .from('schedule_plans')
+    .upsert(
+      {
+        ...plan,
+        updated_at: new Date().toISOString()
+      },
+      {
+        onConflict: 'tenant_id,store_id,plan_date'
+      }
+    )
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('保存排班计划失败:', error)
+    console.error('计划数据:', plan)
+    return null
+  }
+  return data
+}
+
+/**
+ * 获取排班计划
+ */
+export async function getSchedulePlan(tenantId: string, storeId: string, planDate: string) {
+  const {data, error} = await supabase
+    .from('schedule_plans')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .eq('plan_date', planDate)
+    .maybeSingle()
+
+  if (error) {
+    console.error('获取排班计划失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 创建排班计划餐段明细
+ */
+export async function createSchedulePlanPeriods(periods: Partial<SchedulePlanPeriod>[]) {
+  const {data, error} = await supabase.from('schedule_plan_periods').insert(periods).select()
+
+  if (error) {
+    console.error('创建排班计划餐段明细失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 获取排班计划餐段明细
+ */
+export async function getSchedulePlanPeriods(schedulePlanId: string) {
+  const {data, error} = await supabase
+    .from('schedule_plan_periods')
+    .select('*')
+    .eq('schedule_plan_id', schedulePlanId)
+    .order('id', {ascending: true})
+
+  if (error) {
+    console.error('获取排班计划餐段明细失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 删除排班计划餐段明细
+ */
+export async function deleteSchedulePlanPeriods(schedulePlanId: string) {
+  const {error} = await supabase.from('schedule_plan_periods').delete().eq('schedule_plan_id', schedulePlanId)
+
+  if (error) {
+    console.error('删除排班计划餐段明细失败:', error)
+    return false
+  }
+  return true
+}
+
+/**
+ * 创建排休记录
+ */
+export async function createDayOffRecords(records: Partial<DayOffRecord>[]) {
+  const {data, error} = await supabase.from('day_off_records').insert(records).select()
+
+  if (error) {
+    console.error('创建排休记录失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 获取排休记录
+ */
+export async function getDayOffRecords(schedulePlanId: string) {
+  const {data, error} = await supabase
+    .from('day_off_records')
+    .select('*, employee:employees(*)')
+    .eq('schedule_plan_id', schedulePlanId)
+    .order('id', {ascending: true})
+
+  if (error) {
+    console.error('获取排休记录失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 删除排休记录
+ */
+export async function deleteDayOffRecords(schedulePlanId: string) {
+  const {error} = await supabase.from('day_off_records').delete().eq('schedule_plan_id', schedulePlanId)
+
+  if (error) {
+    console.error('删除排休记录失败:', error)
+    return false
+  }
+  return true
+}
+
+/**
+ * 创建兼职记录
+ */
+export async function createPartTimeRecords(records: Partial<PartTimeRecord>[]) {
+  const {data, error} = await supabase.from('part_time_records').insert(records).select()
+
+  if (error) {
+    console.error('创建兼职记录失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 获取兼职记录
+ */
+export async function getPartTimeRecords(schedulePlanId: string) {
+  const {data, error} = await supabase
+    .from('part_time_records')
+    .select('*')
+    .eq('schedule_plan_id', schedulePlanId)
+    .order('id', {ascending: true})
+
+  if (error) {
+    console.error('获取兼职记录失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 删除兼职记录
+ */
+export async function deletePartTimeRecords(schedulePlanId: string) {
+  const {error} = await supabase.from('part_time_records').delete().eq('schedule_plan_id', schedulePlanId)
+
+  if (error) {
+    console.error('删除兼职记录失败:', error)
+    return false
+  }
+  return true
+}
+
+/**
+ * 获取店铺正式员工数量
+ */
+export async function getRegularEmployeeCount(tenantId: string, storeId: string) {
+  const {data, error} = await supabase
+    .from('employees')
+    .select('id', {count: 'exact', head: true})
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .eq('employee_type', 'full_time')
+    .eq('status', 'active')
+
+  if (error) {
+    console.error('获取正式员工数量失败:', error)
+    return 0
+  }
+  return data || 0
+}
+
+// ==================== 兼职工时记录相关API ====================
+
+/**
+ * 创建兼职工时记录
+ */
+export async function createPartTimeShift(shift: Omit<PartTimeShift, 'id' | 'created_at' | 'updated_at'>) {
+  const {data, error} = await supabase.from('part_time_shifts').insert(shift).select().maybeSingle()
+
+  if (error) {
+    console.error('创建兼职工时记录失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 获取指定日期的兼职记录
+ */
+export async function getPartTimeShiftsByDate(tenantId: string, storeId: string, operationDate: string) {
+  const {data, error} = await supabase
+    .from('part_time_shifts')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .eq('operation_date', operationDate)
+    .order('created_at', {ascending: true})
+
+  if (error) {
+    console.error('获取兼职记录失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 更新兼职工时记录
+ */
+export async function updatePartTimeShift(id: string, updates: Partial<PartTimeShift>) {
+  const {data, error} = await supabase
+    .from('part_time_shifts')
+    .update({...updates, updated_at: new Date().toISOString()})
+    .eq('id', id)
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('更新兼职工时记录失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 删除兼职工时记录
+ */
+export async function deletePartTimeShift(id: string) {
+  const {error} = await supabase.from('part_time_shifts').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除兼职工时记录失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 排班结果相关API ====================
+
+/**
+ * 创建或更新排班结果
+ */
+export async function upsertScheduleResult(result: Omit<ScheduleResult, 'id' | 'created_at' | 'updated_at'>) {
+  console.log('=== upsertScheduleResult 开始 ===')
+  console.log('输入数据:', result)
+
+  const {data, error} = await supabase
+    .from('schedule_results')
+    .upsert(result, {
+      onConflict: 'tenant_id,store_id,operation_date'
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('保存排班结果失败:', error)
+    console.error('错误详情:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    return null
+  }
+
+  console.log('=== upsertScheduleResult 成功 ===')
+  console.log('返回数据:', data)
+  return data
+}
+
+/**
+ * 插入新的排班结果（用于记录调整历史）
+ * 每次调用都会创建新记录，不会覆盖旧记录
+ * 会自动将同一天的旧记录标记为非最新
+ */
+export async function insertScheduleResult(result: Omit<ScheduleResult, 'id' | 'created_at' | 'updated_at'>) {
+  console.log('=== insertScheduleResult 开始 ===')
+  console.log('输入数据:', result)
+
+  // 1. 先将同一天的旧记录标记为非最新
+  const {error: updateError} = await supabase
+    .from('schedule_results')
+    .update({is_latest: false})
+    .eq('tenant_id', result.tenant_id)
+    .eq('store_id', result.store_id)
+    .eq('operation_date', result.operation_date)
+    .eq('is_latest', true)
+
+  if (updateError) {
+    console.error('更新旧记录失败:', updateError)
+  }
+
+  // 2. 插入新记录
+  const {data, error} = await supabase.from('schedule_results').insert(result).select().maybeSingle()
+
+  if (error) {
+    console.error('插入排班结果失败:', error)
+    console.error('错误详情:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    return null
+  }
+
+  console.log('=== insertScheduleResult 成功 ===')
+  console.log('返回数据:', data)
+  return data
+}
+
+/**
+ * 获取指定日期的排班结果（最新版本）
+ */
+export async function getScheduleResultByDate(tenantId: string, storeId: string, operationDate: string) {
+  const {data, error} = await supabase
+    .from('schedule_results')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .eq('operation_date', operationDate)
+    .eq('is_latest', true)
+    .maybeSingle()
+
+  if (error) {
+    console.error('获取排班结果失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 获取日期范围内的排班结果
+ */
+export async function getScheduleResultsByDateRange(
+  tenantId: string,
+  storeId: string,
+  startDate: string,
+  endDate: string
+) {
+  const {data, error} = await supabase
+    .from('schedule_results')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .gte('operation_date', startDate)
+    .lte('operation_date', endDate)
+    .order('operation_date', {ascending: false})
+
+  if (error) {
+    console.error('获取排班结果列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 获取某个日期的所有排班调整历史（按时间倒序）
+ */
+export async function getScheduleAdjustmentHistory(
+  tenantId: string,
+  storeId: string,
+  operationDate: string
+): Promise<ScheduleResult[]> {
+  const {data, error} = await supabase
+    .from('schedule_results')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('store_id', storeId)
+    .eq('operation_date', operationDate)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取排班调整历史失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+// ==================== 今日运营仪表盘 ====================
+
+/**
+ * 获取今日运营仪表盘数据
+ * @param tenantId 租户ID
+ * @returns 今日和累计数据
+ */
+export async function getDashboardData(
+  tenantId: string,
+  storeId?: string
+): Promise<{
+  today: {
+    revenue: number
+    rest_count: number
+    rest_days: number
+    efficiency: number
+    labor_cost: number
+    thousand_yuan_contribution: number
+    cost_ratio: number
+    planned_staff_count: number
+  }
+  accumulated: {
+    revenue: number
+    rest_count: number
+    rest_days: number
+    efficiency: number
+    labor_cost: number
+    thousand_yuan_contribution: number
+    cost_ratio: number
+    planned_staff_count: number
+  }
+  days_count: number
+}> {
+  console.log('=== getDashboardData 开始 ===')
+  console.log('租户ID:', tenantId)
+  console.log('门店ID:', storeId)
+
+  const today = new Date()
+  const todayStr = today.toISOString().split('T')[0]
+
+  // 获取本月第一天
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+  const firstDayStr = firstDayOfMonth.toISOString().split('T')[0]
+
+  console.log('查询日期范围:', {today: todayStr, firstDay: firstDayStr})
+
+  // 查询今日数据（按门店过滤）
+  let todayQuery = supabase
+    .from('schedule_results')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('operation_date', todayStr)
+
+  if (storeId) {
+    todayQuery = todayQuery.eq('store_id', storeId)
+  }
+
+  const {data: todayData, error: todayError} = await todayQuery
+
+  if (todayError) {
+    console.error('获取今日数据失败:', todayError)
+  } else {
+    console.log('今日数据查询结果:', todayData)
+  }
+
+  // 查询今日营业数据（用于获取最新营收）
+  let todayOperationQuery = supabase
+    .from('daily_operations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('operation_date', todayStr)
+
+  if (storeId) {
+    todayOperationQuery = todayOperationQuery.eq('store_id', storeId)
+  }
+
+  const {data: todayOperationData, error: todayOperationError} = await todayOperationQuery
+
+  if (todayOperationError) {
+    console.error('获取今日营业数据失败:', todayOperationError)
+  } else {
+    console.log('今日营业数据查询结果:', todayOperationData)
+  }
+
+  // 查询本月累计数据（按门店过滤）
+  let monthQuery = supabase
+    .from('schedule_results')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .gte('operation_date', firstDayStr)
+    .lte('operation_date', todayStr)
+
+  if (storeId) {
+    monthQuery = monthQuery.eq('store_id', storeId)
+  }
+
+  const {data: monthData, error: monthError} = await monthQuery
+
+  if (monthError) {
+    console.error('获取本月数据失败:', monthError)
+  } else {
+    console.log('本月数据查询结果数量:', monthData?.length || 0)
+  }
+
+  // 查询本月营业数据（用于获取最新营收）
+  let monthOperationQuery = supabase
+    .from('daily_operations')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .gte('operation_date', firstDayStr)
+    .lte('operation_date', todayStr)
+
+  if (storeId) {
+    monthOperationQuery = monthOperationQuery.eq('store_id', storeId)
+  }
+
+  const {data: monthOperationData, error: monthOperationError} = await monthOperationQuery
+
+  if (monthOperationError) {
+    console.error('获取本月营业数据失败:', monthOperationError)
+  } else {
+    console.log('本月营业数据查询结果数量:', monthOperationData?.length || 0)
+  }
+
+  // 计算今日数据
+  const todayResult = todayData && todayData.length > 0 ? todayData[0] : null
+  const todayOperation = todayOperationData && todayOperationData.length > 0 ? todayOperationData[0] : null
+  console.log('今日排班结果:', todayResult)
+  console.log('今日营业数据:', todayOperation)
+
+  // 获取最新营收：优先级 actual_revenue > midday_estimated_revenue > estimated_revenue
+  let todayRevenue = todayResult?.estimated_revenue || 0
+  if (todayOperation) {
+    if (todayOperation.actual_revenue !== null && todayOperation.actual_revenue !== undefined) {
+      todayRevenue = todayOperation.actual_revenue
+      console.log('使用实际营收:', todayRevenue)
+    } else if (
+      todayOperation.midday_estimated_revenue !== null &&
+      todayOperation.midday_estimated_revenue !== undefined
+    ) {
+      todayRevenue = todayOperation.midday_estimated_revenue
+      console.log('使用中午调整营收:', todayRevenue)
+    } else if (todayOperation.estimated_revenue !== null && todayOperation.estimated_revenue !== undefined) {
+      todayRevenue = todayOperation.estimated_revenue
+      console.log('使用预估营收:', todayRevenue)
+    }
+  }
+
+  // 获取最新排休人数：优先级 actual_rest_count > adjusted_rest_count > planned_rest_count
+  let todayRestCount = todayResult?.rest_staff_count || 0
+  if (todayOperation) {
+    if (todayOperation.actual_rest_count !== null && todayOperation.actual_rest_count !== undefined) {
+      todayRestCount = todayOperation.actual_rest_count
+      console.log('使用实际排休人数:', todayRestCount)
+    } else if (todayOperation.adjusted_rest_count !== null && todayOperation.adjusted_rest_count !== undefined) {
+      todayRestCount = todayOperation.adjusted_rest_count
+      console.log('使用调整后排休人数:', todayRestCount)
+    } else if (todayOperation.planned_rest_count !== null && todayOperation.planned_rest_count !== undefined) {
+      todayRestCount = todayOperation.planned_rest_count
+      console.log('使用计划排休人数:', todayRestCount)
+    }
+  }
+
+  // 获取最新上岗人数：优先级 actual_staff_count > adjusted_staff_count > planned_staff_count
+  let todayPlannedStaff = todayResult?.planned_staff_count || 0
+  if (todayOperation) {
+    if (todayOperation.actual_staff_count !== null && todayOperation.actual_staff_count !== undefined) {
+      todayPlannedStaff = todayOperation.actual_staff_count
+      console.log('使用实际上岗人数:', todayPlannedStaff)
+    } else if (todayOperation.adjusted_staff_count !== null && todayOperation.adjusted_staff_count !== undefined) {
+      todayPlannedStaff = todayOperation.adjusted_staff_count
+      console.log('使用调整后上岗人数:', todayPlannedStaff)
+    } else if (todayOperation.planned_staff_count !== null && todayOperation.planned_staff_count !== undefined) {
+      todayPlannedStaff = todayOperation.planned_staff_count
+      console.log('使用计划上岗人数:', todayPlannedStaff)
+    }
+  }
+
+  const todayRestDays = todayResult?.rest_days || 0
+  const todayLaborCost = todayResult?.total_labor_cost || 0
+  // 使用最新营收和最新上岗人数计算人效
+  const todayEfficiency = todayPlannedStaff > 0 ? todayRevenue / todayPlannedStaff : 0
+  const todayThousandYuanContribution = todayLaborCost > 0 ? (todayRevenue / todayLaborCost) * 1000 : 0
+  const todayCostRatio = todayRevenue > 0 ? (todayLaborCost / todayRevenue) * 100 : 0
+
+  console.log('今日计算结果:', {
+    revenue: todayRevenue,
+    restCount: todayRestCount,
+    restDays: todayRestDays,
+    plannedStaff: todayPlannedStaff,
+    laborCost: todayLaborCost,
+    efficiency: todayEfficiency
+  })
+
+  // 计算本月累计数据
+  const monthResults = Array.isArray(monthData) ? monthData : []
+  const monthOperations = Array.isArray(monthOperationData) ? monthOperationData : []
+  const daysCount = monthResults.length
+
+  // 创建日期到营业数据的映射
+  const operationMap = new Map()
+  monthOperations.forEach((op) => {
+    operationMap.set(op.operation_date, op)
+  })
+
+  // 计算累计营收、排休人数、上岗人数，使用最新数据
+  let accumulatedRevenue = 0
+  let accumulatedRestCount = 0
+  let accumulatedPlannedStaff = 0
+
+  monthResults.forEach((result) => {
+    const operation = operationMap.get(result.operation_date)
+    let revenue = result.estimated_revenue || 0
+    let restCount = result.rest_staff_count || 0
+    let staffCount = result.planned_staff_count || 0
+
+    if (operation) {
+      // 营收优先级：actual_revenue > midday_estimated_revenue > estimated_revenue
+      if (operation.actual_revenue !== null && operation.actual_revenue !== undefined) {
+        revenue = operation.actual_revenue
+      } else if (operation.midday_estimated_revenue !== null && operation.midday_estimated_revenue !== undefined) {
+        revenue = operation.midday_estimated_revenue
+      } else if (operation.estimated_revenue !== null && operation.estimated_revenue !== undefined) {
+        revenue = operation.estimated_revenue
+      }
+
+      // 排休人数优先级：actual_rest_count > adjusted_rest_count > planned_rest_count
+      if (operation.actual_rest_count !== null && operation.actual_rest_count !== undefined) {
+        restCount = operation.actual_rest_count
+      } else if (operation.adjusted_rest_count !== null && operation.adjusted_rest_count !== undefined) {
+        restCount = operation.adjusted_rest_count
+      } else if (operation.planned_rest_count !== null && operation.planned_rest_count !== undefined) {
+        restCount = operation.planned_rest_count
+      }
+
+      // 上岗人数优先级：actual_staff_count > adjusted_staff_count > planned_staff_count
+      if (operation.actual_staff_count !== null && operation.actual_staff_count !== undefined) {
+        staffCount = operation.actual_staff_count
+      } else if (operation.adjusted_staff_count !== null && operation.adjusted_staff_count !== undefined) {
+        staffCount = operation.adjusted_staff_count
+      } else if (operation.planned_staff_count !== null && operation.planned_staff_count !== undefined) {
+        staffCount = operation.planned_staff_count
+      }
+    }
+
+    accumulatedRevenue += revenue
+    accumulatedRestCount += restCount
+    accumulatedPlannedStaff += staffCount
+  })
+
+  const accumulatedRestDays = monthResults.reduce((sum, item) => sum + (item.rest_days || 0), 0)
+  const accumulatedLaborCost = monthResults.reduce((sum, item) => sum + (item.total_labor_cost || 0), 0)
+  // 使用最新营收和最新上岗人数计算人效
+  const accumulatedEfficiency = accumulatedPlannedStaff > 0 ? accumulatedRevenue / accumulatedPlannedStaff : 0
+  const accumulatedThousandYuanContribution =
+    accumulatedLaborCost > 0 ? (accumulatedRevenue / accumulatedLaborCost) * 1000 : 0
+  const accumulatedCostRatio = accumulatedRevenue > 0 ? (accumulatedLaborCost / accumulatedRevenue) * 100 : 0
+
+  console.log('本月累计结果:', {
+    daysCount,
+    revenue: accumulatedRevenue,
+    restCount: accumulatedRestCount,
+    restDays: accumulatedRestDays,
+    plannedStaff: accumulatedPlannedStaff,
+    efficiency: accumulatedEfficiency
+  })
+
+  console.log('=== getDashboardData 结束 ===')
+
+  return {
+    today: {
+      revenue: todayRevenue,
+      rest_count: todayRestCount,
+      rest_days: todayRestDays,
+      efficiency: todayEfficiency,
+      labor_cost: todayLaborCost,
+      thousand_yuan_contribution: todayThousandYuanContribution,
+      cost_ratio: todayCostRatio,
+      planned_staff_count: todayPlannedStaff
+    },
+    accumulated: {
+      revenue: accumulatedRevenue,
+      rest_count: accumulatedRestCount,
+      rest_days: accumulatedRestDays,
+      efficiency: accumulatedEfficiency,
+      labor_cost: accumulatedLaborCost,
+      thousand_yuan_contribution: accumulatedThousandYuanContribution,
+      cost_ratio: accumulatedCostRatio,
+      planned_staff_count: accumulatedPlannedStaff
+    },
+    days_count: daysCount
+  }
+}
+
+// 获取增强版运营仪表盘数据
+export async function getEnhancedDashboardData(
+  tenantId: string,
+  storeId?: string
+): Promise<{
+  basic: {
+    today: {
+      revenue: number
+      rest_count: number
+      efficiency: number
+      labor_cost: number
+      thousand_yuan_contribution: number
+      cost_ratio: number
+      planned_staff_count: number
+    }
+    accumulated: {
+      revenue: number
+      rest_count: number
+      efficiency: number
+      labor_cost: number
+      thousand_yuan_contribution: number
+      cost_ratio: number
+      planned_staff_count: number
+    }
+    days_count: number
+  }
+  schedule_stats: {
+    total_schedules: number
+    completed_schedules: number
+    completion_rate: number
+    excellent_schedules: number
+    excellent_rate: number
+    participating_employees: number
+  }
+  department_stats: {
+    front_hall: {
+      employee_count: number
+      today_working: number
+      today_rest: number
+    }
+    kitchen: {
+      employee_count: number
+      today_working: number
+      today_rest: number
+    }
+  }
+  trends: {
+    revenue_trend: 'up' | 'down' | 'stable'
+    efficiency_trend: 'up' | 'down' | 'stable'
+    cost_trend: 'up' | 'down' | 'stable'
+  }
+}> {
+  const basicData = await getDashboardData(tenantId, storeId)
+
+  const today = new Date()
+  const todayStr = today.toISOString().split('T')[0]
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+  const firstDayStr = firstDayOfMonth.toISOString().split('T')[0]
+
+  // 获取排班日志统计（按门店过滤）
+  let scheduleLogsQuery = supabase
+    .from('schedule_logs')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .gte('log_date', firstDayStr)
+    .lte('log_date', todayStr)
+
+  if (storeId) {
+    scheduleLogsQuery = scheduleLogsQuery.eq('store_id', storeId)
+  }
+
+  const {data: scheduleLogs} = await scheduleLogsQuery
+
+  const logs = Array.isArray(scheduleLogs) ? scheduleLogs : []
+  const totalSchedules = logs.length
+  const completedSchedules = logs.filter((log) => log.completion_status === 'completed').length
+  const excellentSchedules = logs.filter((log) => log.score && log.score >= 90).length
+  const participatingEmployees = new Set(logs.map((log) => log.employee_id)).size
+
+  // 获取部门统计（按门店过滤）
+  let employeesQuery = supabase.from('employees').select('*').eq('tenant_id', tenantId).eq('status', 'active')
+
+  if (storeId) {
+    employeesQuery = employeesQuery.eq('store_id', storeId)
+  }
+
+  const {data: employees} = await employeesQuery
+
+  const employeeList = Array.isArray(employees) ? employees : []
+  const frontHallCount = employeeList.filter((emp) => emp.department === 'front_hall').length
+  const kitchenCount = employeeList.filter((emp) => emp.department === 'kitchen').length
+
+  // 获取今日排班结果（按门店过滤）
+  let todayResultQuery = supabase
+    .from('schedule_results')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('operation_date', todayStr)
+
+  if (storeId) {
+    todayResultQuery = todayResultQuery.eq('store_id', storeId)
+  }
+
+  const {data: todayResult} = await todayResultQuery.maybeSingle()
+
+  const todayRestCount = todayResult?.rest_staff_count || 0
+  const todayPlannedStaff = todayResult?.planned_staff_count || 0
+
+  // 计算趋势（简化版：对比今日与本月平均）
+  const avgRevenue = basicData.days_count > 0 ? basicData.accumulated.revenue / basicData.days_count : 0
+  const avgEfficiency = basicData.days_count > 0 ? basicData.accumulated.efficiency / basicData.days_count : 0
+  const avgCost = basicData.days_count > 0 ? basicData.accumulated.labor_cost / basicData.days_count : 0
+
+  const revenueTrend =
+    basicData.today.revenue > avgRevenue * 1.05 ? 'up' : basicData.today.revenue < avgRevenue * 0.95 ? 'down' : 'stable'
+  const efficiencyTrend =
+    basicData.today.efficiency > avgEfficiency * 1.05
+      ? 'up'
+      : basicData.today.efficiency < avgEfficiency * 0.95
+        ? 'down'
+        : 'stable'
+  const costTrend =
+    basicData.today.labor_cost > avgCost * 1.05 ? 'up' : basicData.today.labor_cost < avgCost * 0.95 ? 'down' : 'stable'
+
+  return {
+    basic: basicData,
+    schedule_stats: {
+      total_schedules: totalSchedules,
+      completed_schedules: completedSchedules,
+      completion_rate: totalSchedules > 0 ? (completedSchedules / totalSchedules) * 100 : 0,
+      excellent_schedules: excellentSchedules,
+      excellent_rate: totalSchedules > 0 ? (excellentSchedules / totalSchedules) * 100 : 0,
+      participating_employees: participatingEmployees
+    },
+    department_stats: {
+      front_hall: {
+        employee_count: frontHallCount,
+        today_working:
+          frontHallCount + kitchenCount > 0
+            ? Math.max(0, Math.floor((frontHallCount * todayPlannedStaff) / (frontHallCount + kitchenCount)))
+            : 0,
+        today_rest:
+          frontHallCount + kitchenCount > 0
+            ? Math.max(0, Math.floor((frontHallCount * todayRestCount) / (frontHallCount + kitchenCount)))
+            : 0
+      },
+      kitchen: {
+        employee_count: kitchenCount,
+        today_working:
+          frontHallCount + kitchenCount > 0
+            ? Math.max(0, Math.floor((kitchenCount * todayPlannedStaff) / (frontHallCount + kitchenCount)))
+            : 0,
+        today_rest:
+          frontHallCount + kitchenCount > 0
+            ? Math.max(0, Math.floor((kitchenCount * todayRestCount) / (frontHallCount + kitchenCount)))
+            : 0
+      }
+    },
+    trends: {
+      revenue_trend: revenueTrend,
+      efficiency_trend: efficiencyTrend,
+      cost_trend: costTrend
+    }
+  }
+}
+
+/**
+ * 获取租户级别的排班结果统计（用于数据分析和成本管控）
+ * @param tenantId 租户ID
+ * @param startDate 开始日期
+ * @param endDate 结束日期
+ * @returns 排班结果统计数据
+ */
+export async function getScheduleResultsStats(tenantId: string, startDate: string, endDate: string) {
+  console.log('=== getScheduleResultsStats 开始 ===', {tenantId, startDate, endDate})
+
+  const {data, error} = await supabase
+    .from('schedule_results')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .gte('operation_date', startDate)
+    .lte('operation_date', endDate)
+    .order('operation_date', {ascending: false})
+
+  if (error) {
+    console.error('获取排班结果统计失败:', error)
+    return {
+      records: [],
+      stats: {
+        total_records: 0,
+        total_revenue: 0,
+        total_labor_cost: 0,
+        avg_labor_cost_rate: 0,
+        qualified_count: 0,
+        qualified_rate: 0,
+        avg_planned_staff: 0,
+        avg_rest_staff: 0,
+        total_part_time_hours: 0,
+        high_efficiency_count: 0,
+        normal_efficiency_count: 0,
+        low_efficiency_count: 0
+      }
+    }
+  }
+
+  const records = Array.isArray(data) ? data : []
+  console.log('查询到的排班结果记录数:', records.length)
+
+  // 计算统计数据
+  const totalRecords = records.length
+  const totalRevenue = records.reduce((sum, r) => sum + (r.estimated_revenue || 0), 0)
+  const totalLaborCost = records.reduce((sum, r) => sum + (r.total_labor_cost || 0), 0)
+  const avgLaborCostRate =
+    records.length > 0 ? records.reduce((sum, r) => sum + (r.labor_cost_rate || 0), 0) / records.length : 0
+  const qualifiedCount = records.filter((r) => r.is_cost_qualified).length
+  const qualifiedRate = totalRecords > 0 ? (qualifiedCount / totalRecords) * 100 : 0
+  const avgPlannedStaff =
+    records.length > 0 ? records.reduce((sum, r) => sum + (r.planned_staff_count || 0), 0) / records.length : 0
+  const avgRestStaff =
+    records.length > 0 ? records.reduce((sum, r) => sum + (r.rest_staff_count || 0), 0) / records.length : 0
+  const totalPartTimeHours = records.reduce((sum, r) => sum + (r.part_time_hours || 0), 0)
+  const highEfficiencyCount = records.filter((r) => r.efficiency_zone === 'high').length
+  const normalEfficiencyCount = records.filter((r) => r.efficiency_zone === 'normal').length
+  const lowEfficiencyCount = records.filter((r) => r.efficiency_zone === 'low').length
+
+  const stats = {
+    total_records: totalRecords,
+    total_revenue: totalRevenue,
+    total_labor_cost: totalLaborCost,
+    avg_labor_cost_rate: avgLaborCostRate,
+    qualified_count: qualifiedCount,
+    qualified_rate: qualifiedRate,
+    avg_planned_staff: avgPlannedStaff,
+    avg_rest_staff: avgRestStaff,
+    total_part_time_hours: totalPartTimeHours,
+    high_efficiency_count: highEfficiencyCount,
+    normal_efficiency_count: normalEfficiencyCount,
+    low_efficiency_count: lowEfficiencyCount
+  }
+
+  console.log('=== getScheduleResultsStats 完成 ===', stats)
+
+  return {
+    records,
+    stats
+  }
+}
+
+// ==================== 邀请码管理 ====================
+
+/**
+ * 生成邀请码
+ * @param tenantId 租户ID
+ * @param storeId 店铺ID（可选）
+ * @param role 角色
+ * @param maxUses 最大使用次数
+ * @param expiresInDays 有效天数
+ * @param createdBy 创建人ID
+ * @returns 邀请码信息
+ */
+export async function generateInvitationCode(
+  tenantId: string,
+  storeId: string | null,
+  role: string,
+  maxUses: number,
+  expiresInDays: number,
+  createdBy: string
+) {
+  console.log('=== generateInvitationCode 开始 ===', {tenantId, storeId, role, maxUses, expiresInDays, createdBy})
+
+  // 获取当前用户信息用于调试
+  const {data: currentUser} = await supabase.auth.getUser()
+  console.log('当前认证用户:', currentUser?.user?.id)
+
+  // 获取当前用户的 profile 信息
+  const {data: profile, error: profileError} = await supabase
+    .from('profiles')
+    .select('id, tenant_id, role')
+    .eq('id', createdBy)
+    .maybeSingle()
+
+  console.log('当前用户 profile:', profile, '错误:', profileError)
+
+  // 生成邀请码
+  const {data: codeData, error: codeError} = await supabase.rpc('generate_invitation_code')
+
+  if (codeError || !codeData) {
+    console.error('生成邀请码失败:', codeError)
+    return null
+  }
+
+  const code = codeData as string
+  console.log('生成的邀请码:', code)
+
+  // 计算过期时间
+  const expiresAt = new Date()
+  expiresAt.setDate(expiresAt.getDate() + expiresInDays)
+
+  console.log('准备插入邀请码记录:', {
+    tenant_id: tenantId,
+    store_id: storeId,
+    code,
+    role,
+    max_uses: maxUses,
+    expires_at: expiresAt.toISOString(),
+    created_by: createdBy,
+    status: 'active'
+  })
+
+  // 插入邀请码记录
+  const {data, error} = await supabase
+    .from('invitation_codes')
+    .insert({
+      tenant_id: tenantId,
+      store_id: storeId,
+      code,
+      role,
+      max_uses: maxUses,
+      expires_at: expiresAt.toISOString(),
+      created_by: createdBy,
+      status: 'active'
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('保存邀请码失败:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code
+    })
+    return null
+  }
+
+  console.log('=== generateInvitationCode 完成 ===', data)
+  return data
+}
+
+/**
+ * 验证邀请码
+ * @param code 邀请码
+ * @returns 验证结果
+ */
+export async function validateInvitationCode(code: string) {
+  console.log('=== validateInvitationCode 开始 ===', {code})
+
+  const {data, error} = await supabase.rpc('validate_invitation_code', {p_code: code})
+
+  if (error) {
+    console.error('验证邀请码失败:', error)
+    return {
+      is_valid: false,
+      tenant_id: null,
+      tenant_name: null,
+      store_id: null,
+      store_name: null,
+      role: null,
+      message: '验证失败'
+    }
+  }
+
+  const result = Array.isArray(data) && data.length > 0 ? data[0] : data
+  console.log('=== validateInvitationCode 完成 ===', result)
+  return result
+}
+
+/**
+ * 使用邀请码加入租户
+ * @param code 邀请码
+ * @param userId 用户ID
+ * @param userName 用户名
+ * @returns 加入结果
+ */
+export async function joinTenantWithCode(code: string, userId: string, userName: string) {
+  console.log('=== joinTenantWithCode 开始 ===', {code, userId, userName})
+
+  const {data, error} = await supabase.rpc('join_tenant_with_code', {
+    p_code: code,
+    p_user_id: userId,
+    p_user_name: userName
+  })
+
+  if (error) {
+    console.error('加入租户失败:', error)
+    return {
+      success: false,
+      message: '加入失败',
+      tenant_id: null,
+      store_id: null,
+      role: null
+    }
+  }
+
+  const result = Array.isArray(data) && data.length > 0 ? data[0] : data
+  console.log('=== joinTenantWithCode 完成 ===', result)
+  return result
+}
+
+/**
+ * 获取租户的邀请码列表
+ * @param tenantId 租户ID
+ * @returns 邀请码列表
+ */
+export async function getInvitationCodesByTenantId(tenantId: string) {
+  console.log('=== getInvitationCodesByTenantId 开始 ===', {tenantId})
+
+  const {data, error} = await supabase
+    .from('invitation_codes')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取邀请码列表失败:', error)
+    return []
+  }
+
+  console.log('=== getInvitationCodesByTenantId 完成 ===', {count: data?.length})
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 停用邀请码
+ * @param codeId 邀请码ID
+ * @returns 是否成功
+ */
+export async function deactivateInvitationCode(codeId: string) {
+  console.log('=== deactivateInvitationCode 开始 ===', {codeId})
+
+  const {error} = await supabase.from('invitation_codes').update({status: 'inactive'}).eq('id', codeId)
+
+  if (error) {
+    console.error('停用邀请码失败:', error)
+    return false
+  }
+
+  console.log('=== deactivateInvitationCode 完成 ===')
+  return true
+}
+
+// ==================== 用户管理 ====================
+
+/**
+ * 获取租户的所有用户
+ * @param tenantId 租户ID
+ * @returns 用户列表
+ */
+export async function getTenantUsers(tenantId: string) {
+  console.log('=== getTenantUsers 开始 ===', {tenantId})
+
+  const {data, error} = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取用户列表失败:', error)
+    return []
+  }
+
+  console.log('=== getTenantUsers 完成 ===', {count: data?.length})
+  return Array.isArray(data) ? data : []
+}
+
+// ==================== 体验模式相关 API ====================
+
+/**
+ * 获取测试餐厅
+ */
+export async function getDemoTenant(): Promise<Tenant | null> {
+  console.log('=== getDemoTenant 开始 ===')
+
+  const {data, error} = await supabase
+    .from('tenants')
+    .select('*')
+    .eq('is_demo', true)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (error) {
+    console.error('获取测试餐厅失败:', error)
+    return null
+  }
+
+  console.log('=== getDemoTenant 完成 ===', {tenant: data})
+  return data
+}
+
+/**
+ * 更新用户角色
+ */
+export async function updateUserRole(userId: string, role: UserRole): Promise<boolean> {
+  console.log('=== updateUserRole 开始 ===', {userId, role})
+
+  const {error} = await supabase.from('profiles').update({role}).eq('id', userId)
+
+  if (error) {
+    console.error('更新用户角色失败:', error)
+    return false
+  }
+
+  console.log('=== updateUserRole 完成 ===')
+  return true
+}
+
+/**
+ * 将 guest 转换为租户管理员
+ */
+export async function convertGuestToTenantAdmin(userId: string, tenantId: string): Promise<boolean> {
+  console.log('=== convertGuestToTenantAdmin 开始 ===', {userId, tenantId})
+
+  const {error} = await supabase
+    .from('profiles')
+    .update({
+      role: 'tenant_admin',
+      tenant_id: tenantId
+    })
+    .eq('id', userId)
+
+  if (error) {
+    console.error('转换用户角色失败:', error)
+    return false
+  }
+
+  console.log('=== convertGuestToTenantAdmin 完成 ===')
+  return true
+}
+
+// ==================== 租户申请相关 API ====================
+
+// 创建租户申请
+export async function createTenantApplication(application: {
+  applicant_id: string
+  applicant_phone: string
+  tenant_name: string
+  brand_name: string
+  industry: string
+  company_address: string
+  business_license?: string
+  contact_person: string
+  contact_phone: string
+  description?: string
+}): Promise<{success: boolean; message: string; application_id?: string}> {
+  try {
+    const {data, error} = await supabase
+      .from('tenant_applications')
+      .insert({
+        applicant_id: application.applicant_id,
+        applicant_phone: application.applicant_phone,
+        tenant_name: application.tenant_name,
+        brand_name: application.brand_name,
+        industry: application.industry,
+        company_address: application.company_address,
+        business_license: application.business_license || null,
+        contact_person: application.contact_person,
+        contact_phone: application.contact_phone,
+        description: application.description || null,
+        status: 'pending'
+      })
+      .select()
+      .maybeSingle()
+
+    if (error) {
+      console.error('创建租户申请失败:', error)
+      return {success: false, message: '提交申请失败，请稍后重试'}
+    }
+
+    return {success: true, message: '申请已提交，等待超级管理员审核', application_id: data?.id}
+  } catch (error) {
+    console.error('创建租户申请异常:', error)
+    return {success: false, message: '提交申请失败'}
+  }
+}
+
+// 获取用户的租户申请列表
+export async function getUserTenantApplications(userId: string) {
+  const {data, error} = await supabase
+    .from('tenant_applications')
+    .select('*')
+    .eq('applicant_id', userId)
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取租户申请列表失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+// 获取所有待审核的租户申请（超级管理员）
+export async function getPendingTenantApplications() {
+  const {data, error} = await supabase
+    .from('tenant_applications')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取待审核申请失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+// 获取所有租户申请（超级管理员）
+export async function getAllTenantApplications() {
+  const {data, error} = await supabase.from('tenant_applications').select('*').order('created_at', {ascending: false})
+
+  if (error) {
+    console.error('获取所有申请失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+// 批准租户申请（超级管理员）
+export async function approveTenantApplication(
+  applicationId: string,
+  reviewerId: string
+): Promise<{success: boolean; message: string; tenant_id?: string}> {
+  try {
+    // 获取申请详情
+    const {data: application, error: fetchError} = await supabase
+      .from('tenant_applications')
+      .select('*')
+      .eq('id', applicationId)
+      .maybeSingle()
+
+    if (fetchError || !application) {
+      return {success: false, message: '申请不存在'}
+    }
+
+    if (application.status !== 'pending') {
+      return {success: false, message: '该申请已被处理'}
+    }
+
+    // 创建租户
+    const {data: tenant, error: tenantError} = await supabase
+      .from('tenants')
+      .insert({
+        name: application.tenant_name,
+        admin_phone: application.contact_phone,
+        industry: application.industry,
+        package_type: 'basic',
+        status: 'active',
+        store_count: 0,
+        employee_count: 0
+      })
+      .select()
+      .maybeSingle()
+
+    if (tenantError || !tenant) {
+      console.error('创建租户失败:', tenantError)
+      return {success: false, message: '创建租户失败'}
+    }
+
+    // 更新申请人为租户管理员
+    const {error: updateUserError} = await supabase
+      .from('profiles')
+      .update({
+        tenant_id: tenant.id,
+        role: 'tenant_admin'
+      })
+      .eq('id', application.applicant_id)
+
+    if (updateUserError) {
+      console.error('更新用户角色失败:', updateUserError)
+    }
+
+    // 创建租户配置并填充品牌名称
+    const {error: settingsError} = await supabase.from('tenant_settings').insert({
+      tenant_id: tenant.id,
+      brand_name: application.brand_name,
+      default_daily_work_hours: 8.0
+    })
+
+    if (settingsError) {
+      console.error('创建租户配置失败:', settingsError)
+    }
+
+    // 更新申请状态
+    const {error: updateError} = await supabase
+      .from('tenant_applications')
+      .update({
+        status: 'approved',
+        reviewed_by: reviewerId,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq('id', applicationId)
+
+    if (updateError) {
+      console.error('更新申请状态失败:', updateError)
+      return {success: false, message: '更新申请状态失败'}
+    }
+
+    return {success: true, message: '申请已批准', tenant_id: tenant.id}
+  } catch (error) {
+    console.error('批准申请异常:', error)
+    return {success: false, message: '批准申请失败'}
+  }
+}
+
+// 拒绝租户申请（超级管理员）
+export async function rejectTenantApplication(
+  applicationId: string,
+  reviewerId: string,
+  rejectionReason: string
+): Promise<{success: boolean; message: string}> {
+  try {
+    // 获取申请详情
+    const {data: application, error: fetchError} = await supabase
+      .from('tenant_applications')
+      .select('*')
+      .eq('id', applicationId)
+      .maybeSingle()
+
+    if (fetchError || !application) {
+      return {success: false, message: '申请不存在'}
+    }
+
+    if (application.status !== 'pending') {
+      return {success: false, message: '该申请已被处理'}
+    }
+
+    // 更新申请状态
+    const {error: updateError} = await supabase
+      .from('tenant_applications')
+      .update({
+        status: 'rejected',
+        rejection_reason: rejectionReason,
+        reviewed_by: reviewerId,
+        reviewed_at: new Date().toISOString()
+      })
+      .eq('id', applicationId)
+
+    if (updateError) {
+      console.error('更新申请状态失败:', updateError)
+      return {success: false, message: '更新申请状态失败'}
+    }
+
+    return {success: true, message: '申请已拒绝'}
+  } catch (error) {
+    console.error('拒绝申请异常:', error)
+    return {success: false, message: '拒绝申请失败'}
+  }
+}
+
+// ==================== 微信绑定相关 ====================
+
+/**
+ * 绑定微信到用户Profile
+ * @param userId 用户ID
+ * @param code 微信登录code，如果为null则表示解绑
+ * @returns 绑定结果
+ */
+export async function bindWechatToProfile(
+  userId: string,
+  code: string | null
+): Promise<{success: boolean; message?: string}> {
+  try {
+    console.log('=== 开始绑定微信 ===', {userId, hasCode: !!code})
+
+    if (code === null) {
+      // 解绑微信
+      console.log('=== 执行解绑操作 ===')
+      const {error} = await supabase
+        .from('profiles')
+        .update({
+          wechat_openid: null,
+          wechat_unionid: null
+        })
+        .eq('id', userId)
+
+      if (error) {
+        console.error('解绑微信失败:', error)
+        return {success: false, message: `解绑失败: ${error.message}`}
+      }
+
+      console.log('=== 解绑成功 ===')
+      return {success: true, message: '解绑成功'}
+    }
+
+    // 获取用户的 JWT token
+    const {
+      data: {session}
+    } = await supabase.auth.getSession()
+
+    if (!session?.access_token) {
+      console.error('=== 未找到用户会话 ===')
+      return {success: false, message: '用户未登录，请先登录'}
+    }
+
+    // 调用Edge Function进行微信绑定
+    const supabaseUrl = process.env.TARO_APP_SUPABASE_URL
+    const functionUrl = `${supabaseUrl}/functions/v1/bind-wechat`
+
+    console.log('=== 调用Edge Function ===', {
+      url: functionUrl,
+      userId,
+      codeLength: code.length,
+      hasToken: !!session.access_token
+    })
+
+    // 使用 Taro.request 替代 fetch
+    const response = await Taro.request({
+      url: functionUrl,
+      method: 'POST',
+      header: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}` // 使用用户的 JWT token
+      },
+      data: {
+        code,
+        userId
+      },
+      timeout: 30000 // 30秒超时
+    })
+
+    console.log('=== Edge Function响应 ===', {
+      statusCode: response.statusCode,
+      data: response.data
+    })
+
+    // Taro.request 的响应结构不同于 fetch
+    const result = response.data
+
+    if (response.statusCode !== 200 || !result.success) {
+      const errorMsg = result.message || result.error || '绑定失败'
+      console.error('=== 绑定失败 ===', {
+        statusCode: response.statusCode,
+        message: errorMsg
+      })
+      return {
+        success: false,
+        message: errorMsg
+      }
+    }
+
+    console.log('=== 绑定成功 ===')
+    return {success: true, message: '绑定成功'}
+  } catch (error) {
+    console.error('=== 绑定微信异常 ===', error)
+
+    // 提供更详细的错误信息
+    let errorMessage = '绑定失败'
+    if (error instanceof Error) {
+      errorMessage = error.message
+      // 网络错误
+      if (errorMessage.includes('request:fail') || errorMessage.includes('network')) {
+        errorMessage = '网络请求失败，请检查网络连接'
+      }
+      // 超时错误
+      if (errorMessage.includes('timeout')) {
+        errorMessage = '请求超时，请重试'
+      }
+    }
+
+    return {
+      success: false,
+      message: errorMessage
+    }
+  }
+}
+
+/**
+ * 检查用户是否已绑定微信
+ * @param userId 用户ID
+ * @returns 是否已绑定
+ */
+export async function isWechatBound(userId: string): Promise<boolean> {
+  try {
+    const {data, error} = await supabase.from('profiles').select('wechat_openid').eq('id', userId).maybeSingle()
+
+    if (error) {
+      console.error('检查微信绑定状态失败:', error)
+      return false
+    }
+
+    return !!data?.wechat_openid
+  } catch (error) {
+    console.error('检查微信绑定状态异常:', error)
+    return false
+  }
+}
+
+// ==================== 班次配置管理 ====================
+
+/**
+ * 获取租户的班次配置列表
+ */
+export async function getWorkShifts(tenantId: string, storeId?: string) {
+  let query = supabase.from('work_shifts').select('*').eq('tenant_id', tenantId).order('shift_order', {ascending: true})
+
+  // 如果指定了门店ID，则只查询该门店的配置
+  if (storeId) {
+    query = query.eq('store_id', storeId)
+  } else {
+    // 否则查询租户级别的配置（store_id为空）
+    query = query.is('store_id', null)
+  }
+
+  const {data, error} = await query
+
+  if (error) {
+    console.error('获取班次配置失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 创建班次配置
+ */
+export async function createWorkShift(shift: Partial<WorkShift>) {
+  const {data, error} = await supabase.from('work_shifts').insert(shift).select().single()
+
+  if (error) {
+    console.error('创建班次配置失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 更新班次配置
+ */
+export async function updateWorkShift(id: string, shift: Partial<WorkShift>) {
+  const {data, error} = await supabase.from('work_shifts').update(shift).eq('id', id).select().single()
+
+  if (error) {
+    console.error('更新班次配置失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 删除班次配置
+ */
+export async function deleteWorkShift(id: string) {
+  const {error} = await supabase.from('work_shifts').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除班次配置失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 餐段配置管理 ====================
+
+/**
+ * 获取租户的餐段配置列表
+ */
+export async function getMealPeriods(tenantId: string, storeId?: string) {
+  let query = supabase
+    .from('meal_periods')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('period_order', {ascending: true})
+
+  // 如果指定了门店ID，则只查询该门店的配置
+  if (storeId) {
+    query = query.eq('store_id', storeId)
+  } else {
+    // 否则查询租户级别的配置（store_id为空）
+    query = query.is('store_id', null)
+  }
+
+  const {data, error} = await query
+
+  if (error) {
+    console.error('获取餐段配置失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 创建餐段配置
+ */
+export async function createMealPeriod(period: Partial<MealPeriod>) {
+  const {data, error} = await supabase.from('meal_periods').insert(period).select().single()
+
+  if (error) {
+    console.error('创建餐段配置失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 更新餐段配置
+ */
+export async function updateMealPeriod(id: string, period: Partial<MealPeriod>) {
+  const {data, error} = await supabase.from('meal_periods').update(period).eq('id', id).select().single()
+
+  if (error) {
+    console.error('更新餐段配置失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 删除餐段配置
+ */
+export async function deleteMealPeriod(id: string) {
+  const {error} = await supabase.from('meal_periods').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除餐段配置失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 岗位配置相关 API ====================
+
+/**
+ * 获取租户的岗位配置列表
+ */
+export async function getPositionsByTenantId(tenantId: string): Promise<PositionConfig[]> {
+  const {data, error} = await supabase
+    .from('position_config')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .eq('is_active', true)
+    .order('display_order', {ascending: true})
+
+  if (error) {
+    console.error('获取岗位配置失败:', error)
+    return []
+  }
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 创建岗位配置
+ */
+export async function createPosition(position: Partial<PositionConfig>) {
+  const {data, error} = await supabase.from('position_config').insert(position).select().single()
+
+  if (error) {
+    console.error('创建岗位配置失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 更新岗位配置
+ */
+export async function updatePosition(id: string, position: Partial<PositionConfig>) {
+  const {data, error} = await supabase.from('position_config').update(position).eq('id', id).select().single()
+
+  if (error) {
+    console.error('更新岗位配置失败:', error)
+    return null
+  }
+  return data
+}
+
+/**
+ * 删除岗位配置
+ */
+export async function deletePosition(id: string) {
+  const {error} = await supabase.from('position_config').delete().eq('id', id)
+
+  if (error) {
+    console.error('删除岗位配置失败:', error)
+    return false
+  }
+  return true
+}
+
+// ==================== 品牌管理 API ====================
+
+/**
+ * 获取租户下的所有品牌
+ */
+export async function getBrandsByTenantId(tenantId: string): Promise<Brand[]> {
+  const {data, error} = await supabase
+    .from('brands')
+    .select('*')
+    .eq('tenant_id', tenantId)
+    .order('created_at', {ascending: true})
+
+  if (error) {
+    console.error('获取品牌列表失败:', error)
+    return []
+  }
+
+  return Array.isArray(data) ? data : []
+}
+
+/**
+ * 根据ID获取品牌详情
+ */
+export async function getBrandById(brandId: string): Promise<Brand | null> {
+  const {data, error} = await supabase.from('brands').select('*').eq('id', brandId).maybeSingle()
+
+  if (error) {
+    console.error('获取品牌详情失败:', error)
+    return null
+  }
+
+  return data
+}
+
+/**
+ * 创建新品牌
+ */
+export async function createBrand(brand: {
+  tenant_id: string
+  name: string
+  industry?: string
+  logo_url?: string
+  description?: string
+  status?: 'active' | 'inactive' // 添加可选的status字段
+}): Promise<Brand | null> {
+  const {data, error} = await supabase
+    .from('brands')
+    .insert({
+      tenant_id: brand.tenant_id,
+      name: brand.name,
+      industry: brand.industry || null,
+      logo_url: brand.logo_url || null,
+      description: brand.description || null,
+      status: brand.status || 'active' // 使用传入的status或默认为active
+    })
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    console.error('创建品牌失败:', error)
+    return null
+  }
+
+  return data
+}
+
+/**
+ * 更新品牌信息
+ */
+export async function updateBrand(
+  brandId: string,
+  updates: {
+    name?: string
+    industry?: string
+    logo_url?: string
+    description?: string
+    status?: 'active' | 'inactive'
+  }
+): Promise<boolean> {
+  const {error} = await supabase.from('brands').update(updates).eq('id', brandId)
+
+  if (error) {
+    console.error('更新品牌失败:', error)
+    return false
+  }
+
+  return true
+}
+
+/**
+ * 删除品牌
+ */
+export async function deleteBrand(brandId: string): Promise<boolean> {
+  const {error} = await supabase.from('brands').delete().eq('id', brandId)
+
+  if (error) {
+    console.error('删除品牌失败:', error)
+    return false
+  }
+
+  return true
+}
+
+/**
+ * 获取品牌下的门店数量
+ */
+export async function getBrandStoreCount(brandId: string): Promise<number> {
+  const {count, error} = await supabase.from('stores').select('*', {count: 'exact', head: true}).eq('brand_id', brandId)
+
+  if (error) {
+    console.error('获取品牌门店数量失败:', error)
+    return 0
+  }
+
+  return count || 0
+}
+
+/**
+ * 获取品牌下的员工数量
+ */
+export async function getBrandEmployeeCount(brandId: string): Promise<number> {
+  const {count, error} = await supabase
+    .from('employees')
+    .select('*', {count: 'exact', head: true})
+    .eq('brand_id', brandId)
+
+  if (error) {
+    console.error('获取品牌员工数量失败:', error)
+    return 0
+  }
+
+  return count || 0
+}
+
+// ==================== 配置状态检查 API ====================
+
+/**
+ * 检查租户的餐段配置状态
+ */
+export async function hasMealPeriodConfig(tenantId: string): Promise<boolean> {
+  const {count, error} = await supabase
+    .from('meal_periods')
+    .select('*', {count: 'exact', head: true})
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('检查餐段配置失败:', error)
+    return false
+  }
+
+  return (count || 0) > 0
+}
+
+/**
+ * 检查租户的效能标准配置状态
+ */
+export async function hasEfficiencyStandard(tenantId: string): Promise<boolean> {
+  const {count, error} = await supabase
+    .from('efficiency_standards')
+    .select('*', {count: 'exact', head: true})
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('检查效能标准失败:', error)
+    return false
+  }
+
+  return (count || 0) > 0
+}
+
+/**
+ * 检查租户的岗位配置状态
+ */
+export async function hasPositionConfig(tenantId: string): Promise<boolean> {
+  const {count, error} = await supabase
+    .from('position_config')
+    .select('*', {count: 'exact', head: true})
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('检查岗位配置失败:', error)
+    return false
+  }
+
+  return (count || 0) > 0
+}
+
+/**
+ * 检查租户的营业区配置状态
+ */
+export async function hasBusinessAreaConfig(tenantId: string): Promise<boolean> {
+  const {count, error} = await supabase
+    .from('business_area_config')
+    .select('*', {count: 'exact', head: true})
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('检查营业区配置失败:', error)
+    return false
+  }
+
+  return (count || 0) > 0
+}
+
+/**
+ * 检查租户的低营收岗位配置状态
+ */
+export async function hasMinRevenueConfig(tenantId: string): Promise<boolean> {
+  const {count, error} = await supabase
+    .from('min_revenue_positions')
+    .select('*', {count: 'exact', head: true})
+    .eq('tenant_id', tenantId)
+
+  if (error) {
+    console.error('检查低营收配置失败:', error)
+    return false
+  }
+
+  return (count || 0) > 0
+}
+
+/**
+ * 获取租户的配置完成度统计
+ */
+/**
+ * 检查租户是否配置了排休规则
+ */
+export async function hasRestDayRules(tenantId: string): Promise<boolean> {
+  try {
+    const {data, error} = await supabase.from('rest_day_rules').select('id').eq('tenant_id', tenantId).limit(1)
+
+    if (error) {
+      console.error('检查排休规则配置失败:', error)
+      return false
+    }
+
+    return Array.isArray(data) && data.length > 0
+  } catch (error) {
+    console.error('检查排休规则配置异常:', error)
+    return false
+  }
+}
+
+export async function getConfigCompletionStats(tenantId: string): Promise<{
+  basic: {completed: number; total: number; percent: number}
+  business: {completed: number; total: number; percent: number}
+  overall: {completed: number; total: number; percent: number}
+}> {
+  try {
+    // 基础配置检查
+    const [brands, stores, employees] = await Promise.all([
+      getBrandsByTenantId(tenantId),
+      getStoresByTenantId(tenantId),
+      getEmployeesByTenantId(tenantId)
+    ])
+
+    const basicCompleted = [brands.length > 0, stores.length > 0, employees.length > 0].filter(Boolean).length
+    const basicTotal = 3
+
+    // 业务配置检查（增加排休规则检查）
+    const [hasMealPeriod, hasEfficiency, hasPosition, hasBusinessArea, hasMinRevenue, hasRestRules] = await Promise.all(
+      [
+        hasMealPeriodConfig(tenantId),
+        hasEfficiencyStandard(tenantId),
+        hasPositionConfig(tenantId),
+        hasBusinessAreaConfig(tenantId),
+        hasMinRevenueConfig(tenantId),
+        hasRestDayRules(tenantId)
+      ]
+    )
+
+    const businessCompleted = [
+      hasMealPeriod,
+      hasEfficiency,
+      hasPosition,
+      hasBusinessArea,
+      hasMinRevenue,
+      hasRestRules
+    ].filter(Boolean).length
+    const businessTotal = 6
+
+    // 总体完成度
+    const overallCompleted = basicCompleted + businessCompleted
+    const overallTotal = basicTotal + businessTotal
+
+    return {
+      basic: {
+        completed: basicCompleted,
+        total: basicTotal,
+        percent: Math.round((basicCompleted / basicTotal) * 100)
+      },
+      business: {
+        completed: businessCompleted,
+        total: businessTotal,
+        percent: Math.round((businessCompleted / businessTotal) * 100)
+      },
+      overall: {
+        completed: overallCompleted,
+        total: overallTotal,
+        percent: Math.round((overallCompleted / overallTotal) * 100)
+      }
+    }
+  } catch (error) {
+    console.error('获取配置完成度统计失败:', error)
+    return {
+      basic: {completed: 0, total: 3, percent: 0},
+      business: {completed: 0, total: 6, percent: 0},
+      overall: {completed: 0, total: 9, percent: 0}
+    }
+  }
+}
+
+/**
+ * 营收管理相关API
+ */
+
+// 获取门店营收统计数据
+export async function getRevenueStats(storeId: string): Promise<{
+  totalRecords: number
+  currentMonthRecords: number
+  lastMonthRecords: number
+  earliestDate: string | null
+  latestDate: string | null
+}> {
+  try {
+    // 获取总记录数
+    const {count: totalRecords} = await supabase
+      .from('revenue_details')
+      .select('*', {count: 'exact', head: true})
+      .eq('store_id', storeId)
+
+    // 获取本月记录数
+    const now = new Date()
+    const currentMonthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const {count: currentMonthRecords} = await supabase
+      .from('revenue_details')
+      .select('*', {count: 'exact', head: true})
+      .eq('store_id', storeId)
+      .gte('revenue_date', currentMonthStart)
+
+    // 获取上月记录数
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const lastMonthStart = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, '0')}-01`
+    const lastMonthEnd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    const {count: lastMonthRecords} = await supabase
+      .from('revenue_details')
+      .select('*', {count: 'exact', head: true})
+      .eq('store_id', storeId)
+      .gte('revenue_date', lastMonthStart)
+      .lt('revenue_date', lastMonthEnd)
+
+    // 获取最早和最晚日期
+    const {data: dateRange} = await supabase
+      .from('revenue_details')
+      .select('revenue_date')
+      .eq('store_id', storeId)
+      .order('revenue_date', {ascending: true})
+      .limit(1)
+
+    const {data: latestDateData} = await supabase
+      .from('revenue_details')
+      .select('revenue_date')
+      .eq('store_id', storeId)
+      .order('revenue_date', {ascending: false})
+      .limit(1)
+
+    return {
+      totalRecords: totalRecords || 0,
+      currentMonthRecords: currentMonthRecords || 0,
+      lastMonthRecords: lastMonthRecords || 0,
+      earliestDate: dateRange && dateRange.length > 0 ? dateRange[0].revenue_date : null,
+      latestDate: latestDateData && latestDateData.length > 0 ? latestDateData[0].revenue_date : null
+    }
+  } catch (error) {
+    console.error('获取营收统计数据失败:', error)
+    return {
+      totalRecords: 0,
+      currentMonthRecords: 0,
+      lastMonthRecords: 0,
+      earliestDate: null,
+      latestDate: null
+    }
+  }
+}

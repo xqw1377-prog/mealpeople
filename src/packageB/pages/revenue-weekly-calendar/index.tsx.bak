@@ -1,0 +1,590 @@
+/**
+ * 营收预测 - 周日历视图
+ * 基于周日历形式展示月度营收预测
+ * 支持单日修正和整月修正
+ */
+
+import {Button, Input, Picker, ScrollView, Text, View} from '@tarojs/components'
+import Taro, {useDidShow} from '@tarojs/taro'
+import {useAuth} from 'miaoda-auth-taro'
+import type React from 'react'
+import {useCallback, useState} from 'react'
+import {getMonthlyRevenueWithDetails, updateDailyRevenue} from '@/db/api-revenue-calendar'
+import type {DailyRevenueDetail, RevenueCalendar} from '@/db/types-v2'
+import {useTenantStore} from '@/store/tenant'
+
+// 周数据类型
+interface WeekData {
+  weekNumber: number // 第几周
+  days: (DailyRevenueDetail | null)[] // 7天数据，null表示不属于当月
+  weekTotal: number // 本周总营收
+  weekAvg: number // 本周日均营收
+}
+
+const RevenueWeeklyCalendar: React.FC = () => {
+  const {user} = useAuth({guard: true})
+  const currentTenant = useTenantStore((state) => state.currentTenant)
+  const currentStore = useTenantStore((state) => state.currentStore)
+
+  const [loading, setLoading] = useState(false)
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7))
+  const [calendar, setCalendar] = useState<RevenueCalendar | null>(null)
+  const [dailyDetails, setDailyDetails] = useState<DailyRevenueDetail[]>([])
+  const [weekDataList, setWeekDataList] = useState<WeekData[]>([])
+
+  // 编辑状态
+  const [editingDay, setEditingDay] = useState<string | null>(null) // 正在编辑的日期
+  const [editValue, setEditValue] = useState<string>('') // 编辑的值
+
+  // 生成月份选项（当前月份及未来6个月）
+  const generateMonthOptions = () => {
+    const options: {label: string; value: string}[] = []
+    const now = new Date()
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() + i, 1)
+      const yearMonth = date.toISOString().substring(0, 7)
+      const label = `${date.getFullYear()}年${date.getMonth() + 1}月`
+      options.push({label, value: yearMonth})
+    }
+    return options
+  }
+
+  const monthOptions = generateMonthOptions()
+
+  // 将日度数据组织成周数据
+  const organizeIntoWeeks = useCallback((details: DailyRevenueDetail[]): WeekData[] => {
+    if (details.length === 0) return []
+
+    // 按日期排序
+    const sortedDetails = [...details].sort((a, b) => a.revenue_date.localeCompare(b.revenue_date))
+
+    // 获取月份第一天和最后一天
+    const firstDay = new Date(sortedDetails[0].revenue_date)
+    const lastDay = new Date(sortedDetails[sortedDetails.length - 1].revenue_date)
+
+    // 获取第一天是星期几（0=周日，1=周一，...，6=周六）
+    const firstDayOfWeek = firstDay.getDay()
+    // 调整为周一开始（0=周一，1=周二，...，6=周日）
+    const adjustedFirstDay = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1
+
+    // 创建日期到数据的映射
+    const dateMap = new Map<string, DailyRevenueDetail>()
+    sortedDetails.forEach((detail) => {
+      dateMap.set(detail.revenue_date, detail)
+    })
+
+    const weeks: WeekData[] = []
+    let currentWeekDays: (DailyRevenueDetail | null)[] = []
+    let weekNumber = 1
+
+    // 填充第一周前面的空白
+    for (let i = 0; i < adjustedFirstDay; i++) {
+      currentWeekDays.push(null)
+    }
+
+    // 遍历整个月的每一天
+    const currentDate = new Date(firstDay)
+    while (currentDate <= lastDay) {
+      const dateStr = currentDate.toISOString().split('T')[0]
+      const dayData = dateMap.get(dateStr) || null
+
+      currentWeekDays.push(dayData)
+
+      // 如果是周日或者是最后一天，结束当前周
+      if (currentWeekDays.length === 7 || currentDate.getTime() === lastDay.getTime()) {
+        // 填充本周剩余的空白
+        while (currentWeekDays.length < 7) {
+          currentWeekDays.push(null)
+        }
+
+        // 计算本周统计
+        const validDays = currentWeekDays.filter((d) => d !== null) as DailyRevenueDetail[]
+        const weekTotal = validDays.reduce((sum, d) => sum + d.predicted_revenue, 0)
+        const weekAvg = validDays.length > 0 ? weekTotal / validDays.length : 0
+
+        weeks.push({
+          weekNumber,
+          days: currentWeekDays,
+          weekTotal,
+          weekAvg
+        })
+
+        currentWeekDays = []
+        weekNumber++
+      }
+
+      currentDate.setDate(currentDate.getDate() + 1)
+    }
+
+    return weeks
+  }, [])
+
+  // 加载营收数据
+  const loadData = useCallback(async () => {
+    if (!currentTenant || !currentStore) return
+
+    setLoading(true)
+    try {
+      const {calendar: cal, details} = await getMonthlyRevenueWithDetails(
+        currentTenant.id,
+        currentStore.id,
+        selectedMonth
+      )
+      setCalendar(cal)
+      setDailyDetails(details)
+
+      // 组织成周数据
+      const weeks = organizeIntoWeeks(details)
+      setWeekDataList(weeks)
+    } catch (error) {
+      console.error('加载数据失败:', error)
+      Taro.showToast({
+        title: '加载失败',
+        icon: 'error'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [currentTenant, currentStore, selectedMonth, organizeIntoWeeks])
+
+  useDidShow(() => {
+    loadData()
+  })
+
+  // 执行生成预测
+  const generatePrediction = useCallback(async () => {
+    if (!currentTenant || !currentStore || !user) return
+
+    Taro.showLoading({
+      title: '生成中...',
+      mask: true
+    })
+
+    try {
+      const {revenueForecastService} = await import('@/services/revenue-forecast')
+      const result = await revenueForecastService.generateMonthlyCalendar({
+        tenantId: currentTenant.id,
+        storeId: currentStore.id,
+        targetMonth: selectedMonth,
+        userId: user.id,
+        useHistoricalData: true
+      })
+
+      Taro.hideLoading()
+
+      if (result.success) {
+        Taro.showToast({
+          title: '生成成功',
+          icon: 'success',
+          duration: 2000
+        })
+        await loadData()
+      } else {
+        Taro.showToast({
+          title: result.message || '生成失败',
+          icon: 'error',
+          duration: 2000
+        })
+      }
+    } catch (error) {
+      Taro.hideLoading()
+      console.error('生成预测失败:', error)
+      Taro.showToast({
+        title: '生成失败',
+        icon: 'error',
+        duration: 2000
+      })
+    }
+  }, [currentTenant, currentStore, user, selectedMonth, loadData])
+
+  // 生成预测
+  const handleGeneratePrediction = useCallback(async () => {
+    if (!currentTenant || !currentStore || !user) return
+
+    if (calendar) {
+      Taro.showModal({
+        title: '提示',
+        content: '该月份已存在营收预测，是否重新生成？',
+        success: async (res) => {
+          if (res.confirm) {
+            await generatePrediction()
+          }
+        }
+      })
+    } else {
+      await generatePrediction()
+    }
+  }, [currentTenant, currentStore, user, calendar, generatePrediction])
+
+  // 开始编辑某一天
+  const handleStartEdit = (day: DailyRevenueDetail) => {
+    setEditingDay(day.revenue_date)
+    setEditValue(day.predicted_revenue.toString())
+  }
+
+  // 取消编辑
+  const handleCancelEdit = () => {
+    setEditingDay(null)
+    setEditValue('')
+  }
+
+  // 保存编辑
+  const handleSaveEdit = async (day: DailyRevenueDetail) => {
+    if (!currentTenant || !currentStore) return
+
+    const newRevenue = Number.parseFloat(editValue)
+    if (Number.isNaN(newRevenue) || newRevenue < 0) {
+      Taro.showToast({
+        title: '请输入有效金额',
+        icon: 'none'
+      })
+      return
+    }
+
+    try {
+      await updateDailyRevenue(day.id, {
+        predicted_revenue: newRevenue
+      })
+
+      Taro.showToast({
+        title: '修改成功',
+        icon: 'success'
+      })
+
+      // 重新加载数据
+      await loadData()
+      handleCancelEdit()
+    } catch (error) {
+      console.error('修改失败:', error)
+      Taro.showToast({
+        title: '修改失败',
+        icon: 'error'
+      })
+    }
+  }
+
+  // 一键修正整月数据
+  const handleBatchCorrection = async () => {
+    if (!currentTenant || !currentStore || !calendar) return
+
+    Taro.showModal({
+      title: '一键修正整月',
+      content: '请选择修正方式',
+      showCancel: true,
+      cancelText: '取消',
+      confirmText: '基于历史',
+      success: async (res) => {
+        if (res.confirm) {
+          // 基于历史数据修正
+          await handleHistoricalCorrection()
+        }
+      }
+    })
+  }
+
+  // 基于历史数据修正
+  const handleHistoricalCorrection = async () => {
+    if (!currentTenant || !currentStore || !user) return
+
+    Taro.showLoading({
+      title: '修正中...',
+      mask: true
+    })
+
+    try {
+      // 重新生成预测（使用历史数据）
+      const {revenueForecastService} = await import('@/services/revenue-forecast')
+      const result = await revenueForecastService.generateMonthlyCalendar({
+        tenantId: currentTenant.id,
+        storeId: currentStore.id,
+        targetMonth: selectedMonth,
+        userId: user.id,
+        useHistoricalData: true
+      })
+
+      Taro.hideLoading()
+
+      if (result.success) {
+        Taro.showToast({
+          title: '修正成功',
+          icon: 'success'
+        })
+        await loadData()
+      } else {
+        Taro.showToast({
+          title: result.message || '修正失败',
+          icon: 'error'
+        })
+      }
+    } catch (error) {
+      Taro.hideLoading()
+      console.error('修正失败:', error)
+      Taro.showToast({
+        title: '修正失败',
+        icon: 'error'
+      })
+    }
+  }
+
+  // 格式化金额
+  const formatAmount = (amount: number) => {
+    return `¥${Math.round(amount).toLocaleString()}`
+  }
+
+  // 获取星期几
+  const _getWeekday = (dateStr: string) => {
+    const weekdays = ['一', '二', '三', '四', '五', '六', '日']
+    const date = new Date(dateStr)
+    const day = date.getDay()
+    return weekdays[day === 0 ? 6 : day - 1]
+  }
+
+  // 获取日期（几号）
+  const getDay = (dateStr: string) => {
+    const date = new Date(dateStr)
+    return date.getDate()
+  }
+
+  // 判断是否是周末
+  const isWeekend = (dateStr: string) => {
+    const date = new Date(dateStr)
+    const day = date.getDay()
+    return day === 0 || day === 6
+  }
+
+  // 计算月度统计
+  const calculateMonthlyStats = () => {
+    if (!calendar) {
+      return {
+        totalRevenue: 0,
+        avgRevenue: 0,
+        totalDays: 0
+      }
+    }
+
+    const avgRevenue = dailyDetails.length > 0 ? calendar.predicted_total_revenue / dailyDetails.length : 0
+
+    return {
+      totalRevenue: calendar.predicted_total_revenue,
+      avgRevenue,
+      totalDays: dailyDetails.length
+    }
+  }
+
+  const stats = calculateMonthlyStats()
+
+  if (!currentTenant || !currentStore) {
+    return (
+      <View
+        className="min-h-screen flex items-center justify-center"
+        style={{background: 'linear-gradient(to bottom, #eff6ff, #dbeafe)'}}>
+        <View className="bg-white rounded-2xl p-8 text-center mx-4">
+          <View className="i-mdi-alert-circle-outline text-6xl text-blue-500 mx-auto mb-4" />
+          <Text className="text-base text-gray-700 block mb-2">请先选择租户和门店</Text>
+        </View>
+      </View>
+    )
+  }
+
+  return (
+    <View className="min-h-screen" style={{background: 'linear-gradient(to bottom, #eff6ff, #dbeafe)'}}>
+      <ScrollView scrollY className="h-screen box-border" style={{background: 'transparent'}}>
+        <View className="p-4">
+          {/* 头部卡片 */}
+          <View className="bg-white rounded-xl p-4 mb-4 shadow-sm">
+            <View className="flex items-center justify-between mb-3">
+              <View>
+                <Text className="text-base font-bold text-gray-800 block">营收预测 - 周日历</Text>
+                <Text className="text-xs text-gray-500 block mt-1">按周展示，方便对比分析</Text>
+              </View>
+            </View>
+
+            {/* 月份选择 */}
+            <View className="mb-3">
+              <Text className="text-xs text-gray-600 block mb-2">选择月份</Text>
+              <Picker
+                mode="selector"
+                range={monthOptions}
+                rangeKey="label"
+                value={monthOptions.findIndex((m) => m.value === selectedMonth)}
+                onChange={(e) => {
+                  const index = e.detail.value
+                  setSelectedMonth(monthOptions[index].value)
+                }}>
+                <View className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                  <Text className="text-sm text-gray-800">
+                    {monthOptions.find((m) => m.value === selectedMonth)?.label}
+                  </Text>
+                  <View className="i-mdi-chevron-down text-base text-gray-400" />
+                </View>
+              </Picker>
+            </View>
+
+            {/* 操作按钮 */}
+            <View className="flex gap-2">
+              <Button
+                className="flex-1 bg-blue-500 text-white py-3 rounded-lg text-sm break-keep"
+                size="default"
+                onClick={handleGeneratePrediction}>
+                生成预测
+              </Button>
+              {calendar && (
+                <Button
+                  className="flex-1 bg-green-500 text-white py-3 rounded-lg text-sm break-keep"
+                  size="default"
+                  onClick={handleBatchCorrection}>
+                  一键修正
+                </Button>
+              )}
+            </View>
+          </View>
+
+          {/* 月度统计卡片 */}
+          {calendar && (
+            <View className="bg-white rounded-xl p-4 mb-4 shadow-sm">
+              <Text className="text-sm font-bold text-gray-800 block mb-3">月度统计</Text>
+              <View className="grid grid-cols-3 gap-3">
+                <View className="bg-blue-50 rounded-lg p-3">
+                  <Text className="text-xs text-blue-600 block mb-1">预测总营收</Text>
+                  <Text className="text-base font-bold text-blue-700 block">{formatAmount(stats.totalRevenue)}</Text>
+                </View>
+                <View className="bg-green-50 rounded-lg p-3">
+                  <Text className="text-xs text-green-600 block mb-1">日均营收</Text>
+                  <Text className="text-base font-bold text-green-700 block">{formatAmount(stats.avgRevenue)}</Text>
+                </View>
+                <View className="bg-purple-50 rounded-lg p-3">
+                  <Text className="text-xs text-purple-600 block mb-1">天数</Text>
+                  <Text className="text-base font-bold text-purple-700 block">{stats.totalDays}天</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* 周日历视图 */}
+          {loading ? (
+            <View className="flex items-center justify-center py-20">
+              <View className="i-mdi-loading text-4xl text-blue-500 animate-spin" />
+              <Text className="text-sm text-gray-500 mt-4 block">加载中...</Text>
+            </View>
+          ) : weekDataList.length === 0 ? (
+            <View className="bg-white rounded-xl p-8 text-center">
+              <View className="i-mdi-calendar-blank text-6xl text-gray-300 mx-auto mb-4" />
+              <Text className="text-sm text-gray-500 block mb-4">暂无数据</Text>
+              <Text className="text-xs text-gray-400 block">请点击"生成预测"按钮生成营收预测</Text>
+            </View>
+          ) : (
+            <View className="space-y-4">
+              {/* 表头 */}
+              <View className="bg-white rounded-xl overflow-hidden shadow-sm">
+                <View className="flex bg-gray-50 border-b border-gray-200">
+                  <View className="w-16 p-2 border-r border-gray-200">
+                    <Text className="text-xs text-gray-600 text-center block">周次</Text>
+                  </View>
+                  {['一', '二', '三', '四', '五', '六', '日'].map((day, index) => (
+                    <View key={day} className={`flex-1 p-2 border-r border-gray-200 ${index >= 5 ? 'bg-blue-50' : ''}`}>
+                      <Text
+                        className={`text-xs text-center block ${index >= 5 ? 'text-blue-600 font-semibold' : 'text-gray-600'}`}>
+                        周{day}
+                      </Text>
+                    </View>
+                  ))}
+                  <View className="w-20 p-2">
+                    <Text className="text-xs text-gray-600 text-center block">周均</Text>
+                  </View>
+                </View>
+
+                {/* 周数据行 */}
+                {weekDataList.map((week) => (
+                  <View key={week.weekNumber} className="flex border-b border-gray-100 last:border-b-0">
+                    {/* 周次 */}
+                    <View className="w-16 p-2 border-r border-gray-200 flex items-center justify-center bg-gray-50">
+                      <Text className="text-xs text-gray-700 font-semibold block">第{week.weekNumber}周</Text>
+                    </View>
+
+                    {/* 7天数据 */}
+                    {week.days.map((day, dayIndex) => {
+                      if (!day) {
+                        return (
+                          <View key={`empty-${dayIndex}`} className="flex-1 p-2 border-r border-gray-200 bg-gray-50" />
+                        )
+                      }
+
+                      const isEditing = editingDay === day.revenue_date
+                      const isWeekendDay = isWeekend(day.revenue_date)
+
+                      return (
+                        <View
+                          key={day.revenue_date}
+                          className={`flex-1 p-2 border-r border-gray-200 ${isWeekendDay ? 'bg-blue-50' : ''}`}>
+                          {/* 日期 */}
+                          <Text
+                            className={`text-xs text-center block mb-1 ${isWeekendDay ? 'text-blue-600 font-semibold' : 'text-gray-500'}`}>
+                            {getDay(day.revenue_date)}日
+                          </Text>
+
+                          {/* 营收金额 - 可编辑 */}
+                          {isEditing ? (
+                            <View className="space-y-1">
+                              <View style={{overflow: 'hidden'}}>
+                                <Input
+                                  type="digit"
+                                  value={editValue}
+                                  onInput={(e) => setEditValue(e.detail.value)}
+                                  className="text-xs text-center bg-white border border-blue-500 rounded px-1 py-1 w-full"
+                                  placeholder="金额"
+                                />
+                              </View>
+                              <View className="flex gap-1">
+                                <View className="flex-1 bg-green-500 rounded py-1" onClick={() => handleSaveEdit(day)}>
+                                  <Text className="text-xs text-white text-center block">✓</Text>
+                                </View>
+                                <View className="flex-1 bg-gray-400 rounded py-1" onClick={handleCancelEdit}>
+                                  <Text className="text-xs text-white text-center block">✕</Text>
+                                </View>
+                              </View>
+                            </View>
+                          ) : (
+                            <View onClick={() => handleStartEdit(day)}>
+                              <Text
+                                className={`text-xs text-center block font-semibold ${isWeekendDay ? 'text-blue-700' : 'text-gray-800'}`}>
+                                {formatAmount(day.predicted_revenue)}
+                              </Text>
+                              <Text className="text-xs text-gray-400 text-center block mt-1">点击修改</Text>
+                            </View>
+                          )}
+                        </View>
+                      )
+                    })}
+
+                    {/* 周均 */}
+                    <View className="w-20 p-2 flex items-center justify-center bg-purple-50">
+                      <Text className="text-xs text-purple-700 font-bold block text-center">
+                        {formatAmount(week.weekAvg)}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              {/* 说明卡片 */}
+              <View className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <View className="flex items-start gap-2 mb-2">
+                  <View className="i-mdi-information-outline text-base text-blue-600 mt-0.5" />
+                  <Text className="text-xs text-blue-800 font-semibold block">使用说明</Text>
+                </View>
+                <View className="space-y-1 ml-6">
+                  <Text className="text-xs text-blue-700 block">• 蓝色背景表示周末（周六、周日）</Text>
+                  <Text className="text-xs text-blue-700 block">• 点击任意日期可修改当天预测营收</Text>
+                  <Text className="text-xs text-blue-700 block">• 点击"一键修正"可基于历史数据重新生成</Text>
+                  <Text className="text-xs text-blue-700 block">• 周均显示该周的日均营收</Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+    </View>
+  )
+}
+
+export default RevenueWeeklyCalendar

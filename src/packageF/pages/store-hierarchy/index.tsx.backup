@@ -1,0 +1,358 @@
+/**
+ * 门店组织架构配置页面
+ * 功能：
+ * 1. 组织架构树形展示
+ * 2. 岗位添加和编辑
+ * 3. 人员分配功能
+ * 4. 缺岗提醒
+ * 5. 顶岗原则配置
+ */
+
+import {Button, Input, Picker, ScrollView, Text, View} from '@tarojs/components'
+import Taro, {useDidShow} from '@tarojs/taro'
+import {useAuth} from 'miaoda-auth-taro'
+import type React from 'react'
+import {useCallback, useEffect, useState} from 'react'
+import {getEmployeesByStoreId, getStoresByTenantId} from '@/db/api'
+import {
+  assignPositionStaff,
+  createOrganizationNode,
+  deleteOrganizationNode,
+  getPositionsByTenant,
+  getStoreOrganizationTree,
+  getStorePositionAssignments,
+  updateOrganizationNode
+} from '@/db/api-position'
+import {getStoreHierarchy, upsertStoreHierarchy} from '@/db/api-v2'
+import type {Employee, Store} from '@/db/types'
+import type {OrganizationNode, Position, StorePositionAssignment} from '@/db/types-position'
+import type {StoreHierarchy} from '@/db/types-v2'
+import {useTenantStore} from '@/store/tenant'
+
+type TabType = 'tree' | 'principle'
+
+const StoreHierarchyPage: React.FC = () => {
+  const {user} = useAuth({guard: true})
+  const {currentTenant} = useTenantStore()
+
+  // 基础数据
+  const [stores, setStores] = useState<Store[]>([])
+  const [selectedStore, setSelectedStore] = useState<string>('')
+  const [positions, setPositions] = useState<Position[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
+
+  // 组织架构数据
+  const [orgTree, setOrgTree] = useState<OrganizationNode[]>([])
+  const [assignments, setAssignments] = useState<StorePositionAssignment[]>([])
+
+  // 顶岗原则配置
+  const [config, setConfig] = useState<StoreHierarchy | null>(null)
+  const [schedulingPrinciple, setSchedulingPrinciple] = useState<'top_only' | 'top_and_down'>('top_only')
+
+  // UI状态
+  const [activeTab, setActiveTab] = useState<TabType>('tree')
+  const [loading, setLoading] = useState(false)
+  const [showAddNodeDialog, setShowAddNodeDialog] = useState(false)
+  const [showAssignDialog, setShowAssignDialog] = useState(false)
+  const [selectedNode, setSelectedNode] = useState<OrganizationNode | null>(null)
+
+  // 新增节点表单
+  const [newNodeName, setNewNodeName] = useState('')
+  const [newNodePosition, setNewNodePosition] = useState('')
+  const [newNodeParent, setNewNodeParent] = useState<string | null>(null)
+  const [newNodeLevel, setNewNodeLevel] = useState(1)
+  const [newNodeRequiredCount, setNewNodeRequiredCount] = useState(1)
+
+  // 人员分配表单
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
+  const [selectedPositionId, setSelectedPositionId] = useState('')
+
+  // 加载店铺列表
+  const loadStores = useCallback(async () => {
+    if (!currentTenant) return
+
+    try {
+      console.log('=== 加载店铺列表 ===')
+      const storeList = await getStoresByTenantId(currentTenant.id)
+      setStores(storeList)
+
+      if (storeList.length > 0 && !selectedStore) {
+        setSelectedStore(storeList[0].id)
+      }
+    } catch (error) {
+      console.error('加载店铺失败:', error)
+    }
+  }, [currentTenant, selectedStore])
+
+  // 加载岗位列表
+  const loadPositions = useCallback(async () => {
+    if (!currentTenant) return
+
+    try {
+      console.log('=== 加载岗位列表 ===')
+      const positionList = await getPositionsByTenant(currentTenant.id)
+      setPositions(positionList)
+    } catch (error) {
+      console.error('加载岗位失败:', error)
+    }
+  }, [currentTenant])
+
+  // 加载员工列表
+  const loadEmployees = useCallback(async () => {
+    if (!selectedStore) return
+
+    try {
+      console.log('=== 加载员工列表 ===', {storeId: selectedStore})
+      const employeeList = await getEmployeesByStoreId(selectedStore)
+      setEmployees(employeeList)
+    } catch (error) {
+      console.error('加载员工失败:', error)
+    }
+  }, [selectedStore])
+
+  // 加载组织架构树
+  const loadOrgTree = useCallback(async () => {
+    if (!selectedStore) return
+
+    try {
+      console.log('=== 加载组织架构树 ===', {storeId: selectedStore})
+      const tree = await getStoreOrganizationTree(selectedStore)
+      setOrgTree(tree)
+    } catch (error) {
+      console.error('加载组织架构树失败:', error)
+    }
+  }, [selectedStore])
+
+  // 加载人员分配
+  const loadAssignments = useCallback(async () => {
+    if (!selectedStore) return
+
+    try {
+      console.log('=== 加载人员分配 ===', {storeId: selectedStore})
+      const assignmentList = await getStorePositionAssignments(selectedStore)
+      setAssignments(assignmentList)
+    } catch (error) {
+      console.error('加载人员分配失败:', error)
+    }
+  }, [selectedStore])
+
+  // 加载配置
+  const loadConfig = useCallback(async () => {
+    if (!selectedStore) return
+
+    setLoading(true)
+    try {
+      const storeConfig = await getStoreHierarchy(selectedStore)
+      if (storeConfig) {
+        setConfig(storeConfig)
+        setSchedulingPrinciple(storeConfig.scheduling_principle)
+      } else {
+        setConfig(null)
+        setSchedulingPrinciple('top_only')
+      }
+    } catch (error) {
+      console.error('加载配置失败:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedStore])
+
+  useDidShow(() => {
+    loadStores()
+  })
+
+  // 当选择店铺变化时加载配置
+  useEffect(() => {
+    if (selectedStore) {
+      loadConfig()
+    }
+  }, [selectedStore, loadConfig])
+
+  // 保存配置
+  const handleSave = useCallback(async () => {
+    if (!selectedStore || !currentTenant) {
+      Taro.showToast({
+        title: '请选择店铺',
+        icon: 'none'
+      })
+      return
+    }
+
+    setLoading(true)
+    try {
+      await upsertStoreHierarchy({
+        tenant_id: currentTenant.id,
+        store_id: selectedStore,
+        scheduling_principle: schedulingPrinciple,
+        created_by: user?.id
+      })
+
+      Taro.showToast({
+        title: '保存成功',
+        icon: 'success'
+      })
+
+      loadConfig()
+    } catch (error) {
+      console.error('保存配置失败:', error)
+      Taro.showToast({
+        title: '保存失败',
+        icon: 'error'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedStore, currentTenant, schedulingPrinciple, user, loadConfig])
+
+  return (
+    <View className="min-h-screen" style={{background: 'linear-gradient(to bottom, #fef3c7, #fde68a)'}}>
+      <ScrollView scrollY className="h-screen" style={{background: 'transparent'}}>
+        <View className="p-4">
+          {/* 头部说明 */}
+          <View className="bg-white rounded-xl p-4 mb-4 shadow-sm">
+            <View className="flex items-center gap-3 mb-2">
+              <View className="i-mdi-sitemap text-2xl text-indigo-500" />
+              <View className="flex-1">
+                <Text className="text-base font-bold text-gray-800 block mb-1">门店组织架构配置</Text>
+                <Text className="text-xs text-gray-500 block">配置门店的顶岗原则和组织架构</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* 店铺选择 */}
+          <View className="bg-white rounded-xl p-4 mb-4 shadow-sm">
+            <Text className="text-sm font-bold text-gray-800 mb-3">选择店铺</Text>
+            {stores.length === 0 ? (
+              <Text className="text-sm text-gray-500 text-center py-4">暂无店铺</Text>
+            ) : (
+              <View className="flex flex-wrap gap-2">
+                {stores.map((store) => (
+                  <Button
+                    key={store.id}
+                    className={`px-4 py-2 rounded-lg text-sm break-keep ${
+                      selectedStore === store.id ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600'
+                    }`}
+                    size="default"
+                    onClick={() => setSelectedStore(store.id)}>
+                    {store.name}
+                  </Button>
+                ))}
+              </View>
+            )}
+          </View>
+
+          {/* 顶岗原则配置 */}
+          {selectedStore && (
+            <View className="bg-white rounded-xl p-4 mb-4 shadow-sm">
+              <Text className="text-sm font-bold text-gray-800 mb-3">顶岗原则</Text>
+
+              {loading ? (
+                <View className="py-8 text-center">
+                  <View className="i-mdi-loading text-4xl text-indigo-500 animate-spin mx-auto mb-4" />
+                  <Text className="text-sm text-gray-500">加载中...</Text>
+                </View>
+              ) : (
+                <View className="space-y-3">
+                  {/* 排上顶岗不排下顶岗 */}
+                  <View
+                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                      schedulingPrinciple === 'top_only'
+                        ? 'bg-indigo-50 border-indigo-500'
+                        : 'bg-gray-50 border-gray-200'
+                    }`}
+                    onClick={() => setSchedulingPrinciple('top_only')}>
+                    <View className="flex items-start gap-3">
+                      <View
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
+                          schedulingPrinciple === 'top_only' ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'
+                        }`}>
+                        {schedulingPrinciple === 'top_only' && <View className="i-mdi-check text-xs text-white" />}
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-base font-bold text-gray-800 block mb-1">排上顶岗不排下顶岗</Text>
+                        <Text className="text-sm text-gray-600 block mb-2">
+                          上级岗位可以顶替下级岗位，下级岗位不能顶替上级岗位。适用于严格的层级管理。
+                        </Text>
+                        <View className="bg-white rounded-lg p-3 border border-gray-200">
+                          <Text className="text-xs text-gray-700 block mb-1">示例：</Text>
+                          <Text className="text-xs text-gray-600 block">• 店长可以顶岗主管的工作</Text>
+                          <Text className="text-xs text-gray-600 block">• 主管可以顶岗员工的工作</Text>
+                          <Text className="text-xs text-gray-600 block">• 员工不能顶岗主管或店长的工作</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* 排上可排下（上下都可顶岗） */}
+                  <View
+                    className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
+                      schedulingPrinciple === 'top_and_down'
+                        ? 'bg-indigo-50 border-indigo-500'
+                        : 'bg-gray-50 border-gray-200'
+                    }`}
+                    onClick={() => setSchedulingPrinciple('top_and_down')}>
+                    <View className="flex items-start gap-3">
+                      <View
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center mt-0.5 ${
+                          schedulingPrinciple === 'top_and_down' ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'
+                        }`}>
+                        {schedulingPrinciple === 'top_and_down' && <View className="i-mdi-check text-xs text-white" />}
+                      </View>
+                      <View className="flex-1">
+                        <Text className="text-base font-bold text-gray-800 block mb-1">排上可排下（上下都可顶岗）</Text>
+                        <Text className="text-sm text-gray-600 block mb-2">
+                          上级岗位可以顶替下级岗位，下级岗位也可以顶替上级岗位。适用于灵活的协作管理。
+                        </Text>
+                        <View className="bg-white rounded-lg p-3 border border-gray-200">
+                          <Text className="text-xs text-gray-700 block mb-1">示例：</Text>
+                          <Text className="text-xs text-gray-600 block">• 店长可以顶岗主管和员工的工作</Text>
+                          <Text className="text-xs text-gray-600 block">• 主管可以顶岗店长和员工的工作</Text>
+                          <Text className="text-xs text-gray-600 block">• 员工可以顶岗主管和店长的工作</Text>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* 保存按钮 */}
+              <View className="mt-4">
+                <Button
+                  className="w-full bg-indigo-500 text-white py-3 rounded-lg text-sm break-keep"
+                  size="default"
+                  onClick={handleSave}
+                  disabled={loading}>
+                  保存配置
+                </Button>
+              </View>
+            </View>
+          )}
+
+          {/* 当前配置状态 */}
+          {config && (
+            <View className="bg-white rounded-xl p-4 shadow-sm">
+              <View className="flex items-center gap-2 mb-3">
+                <View className="i-mdi-information text-lg text-blue-500" />
+                <Text className="text-sm font-bold text-gray-800">当前配置</Text>
+              </View>
+              <View className="space-y-2">
+                <View className="flex items-center justify-between">
+                  <Text className="text-sm text-gray-600">顶岗原则：</Text>
+                  <Text className="text-sm font-semibold text-gray-800">
+                    {config.scheduling_principle === 'top_only' ? '排上顶岗不排下顶岗' : '排上可排下（上下都可顶岗）'}
+                  </Text>
+                </View>
+                <View className="flex items-center justify-between">
+                  <Text className="text-sm text-gray-600">更新时间：</Text>
+                  <Text className="text-xs text-gray-500">{new Date(config.updated_at).toLocaleString('zh-CN')}</Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+    </View>
+  )
+}
+
+export default StoreHierarchyPage

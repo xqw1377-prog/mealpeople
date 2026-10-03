@@ -1,0 +1,462 @@
+/**
+ * 数据分析页面 - 重新设计版
+ * 采用Tab切换设计，优化数据展示和交互体验
+ */
+
+import {Button, Picker, ScrollView, Text, View} from '@tarojs/components'
+import Taro, {useDidShow} from '@tarojs/taro'
+import {useAuth} from 'miaoda-auth-taro'
+import {useCallback, useEffect, useState} from 'react'
+import {getStoresByTenantId} from '@/db/api'
+import type {Store} from '@/db/types'
+import type {AnalyticsResult, AnomalyDetection, TrendPrediction} from '@/services/analytics'
+import {analyticsService} from '@/services/analytics'
+import {useTenantStore} from '@/store/tenant'
+
+// Tab类型定义
+type TabType = 'overview' | 'revenue' | 'cost' | 'efficiency' | 'schedule' | 'trend' | 'anomaly'
+
+export default function DataAnalytics() {
+  const {user} = useAuth({guard: true})
+  const currentTenant = useTenantStore((state) => state.currentTenant)
+  const [stores, setStores] = useState<Store[]>([])
+  const [selectedStoreIndex, setSelectedStoreIndex] = useState(0)
+  const [days, setDays] = useState(30)
+  const [loading, setLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<TabType>('overview')
+
+  // 分析结果
+  const [analytics, setAnalytics] = useState<AnalyticsResult | null>(null)
+  const [trends, setTrends] = useState<TrendPrediction[]>([])
+  const [anomalies, setAnomalies] = useState<AnomalyDetection[]>([])
+
+  // Tab配置
+  const tabs = [
+    {key: 'overview', label: '概览', icon: 'i-mdi-view-dashboard'},
+    {key: 'revenue', label: '营收', icon: 'i-mdi-currency-cny'},
+    {key: 'cost', label: '成本', icon: 'i-mdi-cash-multiple'},
+    {key: 'efficiency', label: '效率', icon: 'i-mdi-speedometer'},
+    {key: 'schedule', label: '排班', icon: 'i-mdi-calendar-clock'},
+    {key: 'trend', label: '趋势', icon: 'i-mdi-chart-line'},
+    {key: 'anomaly', label: '异常', icon: 'i-mdi-alert-circle'}
+  ]
+
+  // 加载店铺列表
+  const loadStores = useCallback(async () => {
+    if (!currentTenant?.id) return
+
+    try {
+      const storeList = await getStoresByTenantId(currentTenant.id)
+      setStores([{id: 'all', name: '全部店铺'} as Store, ...storeList])
+    } catch (error) {
+      console.error('加载店铺列表失败:', error)
+      Taro.showToast({title: '加载店铺列表失败', icon: 'none'})
+    }
+  }, [currentTenant?.id])
+
+  // 加载分析数据
+  const loadAnalytics = useCallback(async () => {
+    if (!currentTenant?.id) return
+
+    setLoading(true)
+    try {
+      const storeId = stores[selectedStoreIndex]?.id === 'all' ? undefined : stores[selectedStoreIndex]?.id
+
+      // 执行分析
+      const [analyticsResult, trendPredictions, anomalyDetections] = await Promise.all([
+        analyticsService.analyzeData(currentTenant.id, storeId, days),
+        analyticsService.predictTrends(currentTenant.id, storeId, days),
+        analyticsService.detectAnomalies(currentTenant.id, storeId, days)
+      ])
+
+      setAnalytics(analyticsResult)
+      setTrends(trendPredictions)
+      setAnomalies(anomalyDetections)
+
+      Taro.showToast({title: '分析完成', icon: 'success'})
+    } catch (error) {
+      console.error('分析失败:', error)
+      Taro.showToast({title: '分析失败，请重试', icon: 'none'})
+    } finally {
+      setLoading(false)
+    }
+  }, [stores, selectedStoreIndex, days, currentTenant?.id])
+
+  useEffect(() => {
+    loadStores()
+  }, [loadStores])
+
+  useEffect(() => {
+    if (stores.length > 0) {
+      loadAnalytics()
+    }
+  }, [stores, loadAnalytics])
+
+  useDidShow(() => {
+    loadStores()
+  })
+
+  // 店铺选择
+  const handleStoreChange = useCallback((e) => {
+    setSelectedStoreIndex(Number.parseInt(e.detail.value, 10))
+  }, [])
+
+  // 天数选择
+  const handleDaysChange = useCallback((e) => {
+    const daysOptions = [7, 30, 90]
+    setDays(daysOptions[Number.parseInt(e.detail.value, 10)])
+  }, [])
+
+  // 获取趋势图标
+  const getTrendIcon = (trend: string) => {
+    switch (trend) {
+      case 'up':
+        return 'i-mdi-trending-up'
+      case 'down':
+        return 'i-mdi-trending-down'
+      default:
+        return 'i-mdi-trending-neutral'
+    }
+  }
+
+  // 获取趋势颜色
+  const getTrendColor = (trend: string) => {
+    switch (trend) {
+      case 'up':
+        return 'text-green-500'
+      case 'down':
+        return 'text-red-500'
+      default:
+        return 'text-muted-foreground'
+    }
+  }
+
+  // 获取趋势文本
+  const getTrendText = (trend: string) => {
+    switch (trend) {
+      case 'up':
+        return '上升'
+      case 'down':
+        return '下降'
+      default:
+        return '平稳'
+    }
+  }
+
+  return (
+    <View
+      style={{
+        background: 'linear-gradient(to bottom, hsl(var(--background)), hsl(var(--muted) / 0.2))',
+        minHeight: '100vh'
+      }}>
+      <ScrollView scrollY className="h-screen box-border" style={{background: 'transparent'}}>
+        <View className="p-4">
+          {/* 2.0标识 */}
+          <View className="mb-4 flex items-center justify-center">
+            <View className="bg-primary/10 text-primary px-3 py-1 rounded-full">
+              <Text className="text-xs font-medium">2.0 智能数据分析</Text>
+            </View>
+          </View>
+
+          {/* 筛选条件 */}
+          <View className="bg-card rounded-lg p-4 mb-4 shadow-sm">
+            <View className="mb-4">
+              <Text className="text-sm text-muted-foreground mb-2">选择店铺</Text>
+              <Picker
+                mode="selector"
+                range={stores.map((s) => s.name)}
+                value={selectedStoreIndex}
+                onChange={handleStoreChange}>
+                <View className="bg-input border border-border rounded px-3 py-2">
+                  <Text className="text-foreground">{stores[selectedStoreIndex]?.name || '请选择店铺'}</Text>
+                </View>
+              </Picker>
+            </View>
+
+            <View>
+              <Text className="text-sm text-muted-foreground mb-2">分析周期</Text>
+              <Picker
+                mode="selector"
+                range={['最近7天', '最近30天', '最近90天']}
+                value={days === 7 ? 0 : days === 30 ? 1 : 2}
+                onChange={handleDaysChange}>
+                <View className="bg-input border border-border rounded px-3 py-2">
+                  <Text className="text-foreground">最近{days}天</Text>
+                </View>
+              </Picker>
+            </View>
+          </View>
+
+          {loading ? (
+            <View className="flex items-center justify-center py-12">
+              <Text className="text-muted-foreground">分析中...</Text>
+            </View>
+          ) : analytics ? (
+            <>
+              {/* 营收分析 */}
+              <View className="bg-card rounded-lg p-4 mb-4 shadow-sm">
+                <Text className="text-lg font-semibold text-foreground mb-4">营收分析</Text>
+
+                <View className="space-y-3">
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">总营收</Text>
+                    <Text className="text-xl font-bold text-primary">
+                      ¥{analytics.revenueAnalysis.total.toFixed(2)}
+                    </Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">平均营收</Text>
+                    <Text className="text-lg font-semibold text-foreground">
+                      ¥{analytics.revenueAnalysis.average.toFixed(2)}
+                    </Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">增长率</Text>
+                    <View className="flex items-center gap-2">
+                      <View
+                        className={`${getTrendIcon(analytics.revenueAnalysis.trend)} text-lg ${getTrendColor(analytics.revenueAnalysis.trend)}`}
+                      />
+                      <Text className={`text-lg font-semibold ${getTrendColor(analytics.revenueAnalysis.trend)}`}>
+                        {analytics.revenueAnalysis.growth.toFixed(1)}%
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2">
+                    <Text className="text-muted-foreground">趋势</Text>
+                    <Text className={`text-lg font-semibold ${getTrendColor(analytics.revenueAnalysis.trend)}`}>
+                      {getTrendText(analytics.revenueAnalysis.trend)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* 成本分析 */}
+              <View className="bg-card rounded-lg p-4 mb-4 shadow-sm">
+                <Text className="text-lg font-semibold text-foreground mb-4">成本分析</Text>
+
+                <View className="space-y-3">
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">总成本</Text>
+                    <Text className="text-xl font-bold text-primary">¥{analytics.costAnalysis.total.toFixed(2)}</Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">平均成本</Text>
+                    <Text className="text-lg font-semibold text-foreground">
+                      ¥{analytics.costAnalysis.average.toFixed(2)}
+                    </Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">成本占比</Text>
+                    <Text className="text-lg font-semibold text-foreground">
+                      {analytics.costAnalysis.ratio.toFixed(1)}%
+                    </Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2">
+                    <Text className="text-muted-foreground">趋势</Text>
+                    <View className="flex items-center gap-2">
+                      <View
+                        className={`${getTrendIcon(analytics.costAnalysis.trend)} text-lg ${getTrendColor(analytics.costAnalysis.trend)}`}
+                      />
+                      <Text className={`text-lg font-semibold ${getTrendColor(analytics.costAnalysis.trend)}`}>
+                        {getTrendText(analytics.costAnalysis.trend)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* 效率分析 */}
+              <View className="bg-card rounded-lg p-4 mb-4 shadow-sm">
+                <Text className="text-lg font-semibold text-foreground mb-4">效率分析</Text>
+
+                <View className="space-y-3">
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">平均效率</Text>
+                    <Text className="text-xl font-bold text-primary">
+                      {analytics.efficiencyAnalysis.average.toFixed(1)}
+                    </Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">趋势</Text>
+                    <View className="flex items-center gap-2">
+                      <View
+                        className={`${getTrendIcon(analytics.efficiencyAnalysis.trend)} text-lg ${getTrendColor(analytics.efficiencyAnalysis.trend)}`}
+                      />
+                      <Text className={`text-lg font-semibold ${getTrendColor(analytics.efficiencyAnalysis.trend)}`}>
+                        {getTrendText(analytics.efficiencyAnalysis.trend)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {analytics.efficiencyAnalysis.topPerformers.length > 0 && (
+                    <View className="pt-2">
+                      <Text className="text-sm text-muted-foreground mb-2">高效员工 TOP 5</Text>
+                      <View className="space-y-2">
+                        {analytics.efficiencyAnalysis.topPerformers.map((performer, index) => (
+                          <View
+                            key={performer.id}
+                            className="flex items-center justify-between bg-muted/30 rounded p-2">
+                            <View className="flex items-center gap-2">
+                              <Text className="text-sm font-medium text-primary">#{index + 1}</Text>
+                              <Text className="text-sm text-foreground">{performer.name}</Text>
+                            </View>
+                            <Text className="text-sm font-semibold text-primary">
+                              {performer.efficiency.toFixed(1)}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* 排班分析 */}
+              <View className="bg-card rounded-lg p-4 mb-4 shadow-sm">
+                <Text className="text-lg font-semibold text-foreground mb-4">排班分析</Text>
+
+                <View className="space-y-3">
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">总排班数</Text>
+                    <Text className="text-xl font-bold text-primary">{analytics.scheduleAnalysis.totalShifts}</Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">完成率</Text>
+                    <Text className="text-lg font-semibold text-foreground">
+                      {analytics.scheduleAnalysis.completionRate.toFixed(1)}%
+                    </Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2 border-b border-border">
+                    <Text className="text-muted-foreground">优秀率</Text>
+                    <Text className="text-lg font-semibold text-foreground">
+                      {analytics.scheduleAnalysis.excellentRate.toFixed(1)}%
+                    </Text>
+                  </View>
+
+                  <View className="flex justify-between items-center py-2">
+                    <Text className="text-muted-foreground">平均评分</Text>
+                    <Text className="text-lg font-semibold text-primary">
+                      {analytics.scheduleAnalysis.averageScore.toFixed(1)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* 趋势预测 */}
+              {trends.length > 0 && (
+                <View className="bg-card rounded-lg p-4 mb-4 shadow-sm">
+                  <Text className="text-lg font-semibold text-foreground mb-4">趋势预测</Text>
+
+                  <View className="space-y-3">
+                    {trends.map((trend) => (
+                      <View key={trend.metric} className="bg-muted/30 rounded-lg p-3">
+                        <View className="flex justify-between items-start mb-2">
+                          <Text className="text-base font-medium text-foreground">{trend.metric}</Text>
+                          <View className="flex items-center gap-1">
+                            <View className={`${getTrendIcon(trend.trend)} text-lg ${getTrendColor(trend.trend)}`} />
+                            <Text className={`text-sm font-semibold ${getTrendColor(trend.trend)}`}>
+                              {trend.changeRate.toFixed(1)}%
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View className="flex justify-between items-center mb-2">
+                          <Text className="text-sm text-muted-foreground">当前值</Text>
+                          <Text className="text-sm text-foreground">{trend.current.toFixed(2)}</Text>
+                        </View>
+
+                        <View className="flex justify-between items-center mb-2">
+                          <Text className="text-sm text-muted-foreground">预测值</Text>
+                          <Text className="text-sm text-foreground">{trend.predicted.toFixed(2)}</Text>
+                        </View>
+
+                        <View className="flex justify-between items-center">
+                          <Text className="text-sm text-muted-foreground">置信度</Text>
+                          <Text className="text-sm text-primary">{(trend.confidence * 100).toFixed(0)}%</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* 异常检测 */}
+              {anomalies.length > 0 && (
+                <View className="bg-card rounded-lg p-4 mb-4 shadow-sm">
+                  <Text className="text-lg font-semibold text-foreground mb-4">异常检测</Text>
+
+                  <View className="space-y-3">
+                    {anomalies.map((anomaly) => (
+                      <View key={anomaly.id} className="bg-muted/30 rounded-lg p-3">
+                        <View className="flex justify-between items-start mb-2">
+                          <Text className="text-base font-medium text-foreground">{anomaly.description}</Text>
+                          <Text
+                            className={`text-xs px-2 py-1 rounded ${
+                              anomaly.severity === 'high'
+                                ? 'bg-red-500 text-white'
+                                : anomaly.severity === 'medium'
+                                  ? 'bg-orange-500 text-white'
+                                  : 'bg-blue-500 text-white'
+                            }`}>
+                            {anomaly.severity === 'high' ? '高' : anomaly.severity === 'medium' ? '中' : '低'}
+                          </Text>
+                        </View>
+
+                        <View className="space-y-1">
+                          <View className="flex justify-between items-center">
+                            <Text className="text-sm text-muted-foreground">日期</Text>
+                            <Text className="text-sm text-foreground">{anomaly.date}</Text>
+                          </View>
+
+                          <View className="flex justify-between items-center">
+                            <Text className="text-sm text-muted-foreground">实际值</Text>
+                            <Text className="text-sm text-foreground">{anomaly.value.toFixed(2)}</Text>
+                          </View>
+
+                          <View className="flex justify-between items-center">
+                            <Text className="text-sm text-muted-foreground">期望值</Text>
+                            <Text className="text-sm text-foreground">{anomaly.expected.toFixed(2)}</Text>
+                          </View>
+
+                          <View className="flex justify-between items-center">
+                            <Text className="text-sm text-muted-foreground">偏差率</Text>
+                            <Text className="text-sm text-red-500">{anomaly.deviation.toFixed(1)}%</Text>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </>
+          ) : (
+            <View className="flex flex-col items-center justify-center py-12">
+              <View className="i-mdi-chart-line text-6xl text-muted-foreground/30 mb-4" />
+              <Text className="text-muted-foreground">暂无数据</Text>
+            </View>
+          )}
+
+          {/* 刷新按钮 */}
+          <View className="mt-4">
+            <Button
+              className="w-full bg-primary text-primary-foreground py-3 rounded break-keep text-base"
+              size="default"
+              onClick={loadAnalytics}
+              disabled={loading}>
+              {loading ? '分析中...' : '刷新分析'}
+            </Button>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
+  )
+}

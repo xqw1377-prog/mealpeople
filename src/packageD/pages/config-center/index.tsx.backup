@@ -1,0 +1,450 @@
+/**
+ * 配置中心 - 引导式配置
+ * 引导用户按步骤完成基础配置，确保系统正常运行
+ */
+
+import {Button, ScrollView, Text, View} from '@tarojs/components'
+import Taro, {useDidShow} from '@tarojs/taro'
+import {useAuth} from 'miaoda-auth-taro'
+import {useCallback, useState} from 'react'
+import {EmptyState, LoadingCards, PageHeader} from '@/components/common'
+import {
+  getBrandsByTenantId,
+  getCurrentUser,
+  getEmployeesByTenantId,
+  getPositionsByTenantId,
+  getStoresByTenantId
+} from '@/db/api'
+import type {Profile} from '@/db/types'
+import {useTenantStore} from '@/store/tenant'
+
+// 配置步骤接口
+interface ConfigStep {
+  id: string
+  title: string
+  description: string
+  icon: string
+  url: string
+  completed: boolean
+  required: boolean
+  order: number
+}
+
+// 配置项组件（带完成状态）
+interface ConfigStepItemProps {
+  step: ConfigStep
+  onNavigate: (url: string) => void
+}
+
+const ConfigStepItem: React.FC<ConfigStepItemProps> = ({step, onNavigate}) => {
+  return (
+    <View
+      className="bg-background rounded-xl p-4 shadow-sm active:opacity-70"
+      onClick={() => onNavigate(step.url)}>
+      <View className="flex items-center gap-3">
+        {/* 完成状态图标 */}
+        {step.completed ? (
+          <View className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+            <View className="i-mdi-check-circle text-2xl text-green-600" />
+          </View>
+        ) : (
+          <View className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <View className={`${step.icon} text-2xl text-gray-400`} />
+          </View>
+        )}
+
+        {/* 内容 */}
+        <View className="flex-1">
+          <View className="flex items-center gap-2 mb-1">
+            <Text className="text-base font-bold text-foreground">{step.title}</Text>
+            {step.required && !step.completed && (
+              <View className="bg-red-100 px-2 py-0.5 rounded">
+                <Text className="text-xs text-red-700">必须</Text>
+              </View>
+            )}
+            {step.completed && (
+              <View className="bg-green-100 px-2 py-0.5 rounded">
+                <Text className="text-xs text-green-700">已完成</Text>
+              </View>
+            )}
+          </View>
+          <Text className="text-xs text-muted-foreground">{step.description}</Text>
+        </View>
+
+        {/* 箭头 */}
+        <View className="i-mdi-chevron-right text-xl text-muted-foreground flex-shrink-0" />
+      </View>
+    </View>
+  )
+}
+
+export default function ConfigCenter() {
+  const {user} = useAuth({guard: true})
+  const currentTenant = useTenantStore(state => state.currentTenant)
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [hasPermission, setHasPermission] = useState(false)
+
+  const loadProfile = useCallback(async () => {
+    if (!user?.id) return
+
+    setLoading(true)
+    try {
+      const p = await getCurrentUser()
+      setProfile(p)
+
+      // 检查权限 - 允许超级管理员、租户管理员和店经理访问
+      const allowedRoles = ['super_admin', 'tenant_admin', 'store_manager']
+      if (p?.role && allowedRoles.includes(p.role)) {
+        setHasPermission(true)
+      } else {
+        setHasPermission(false)
+        Taro.showModal({
+          title: '权限不足',
+          content: '只有管理员可以访问配置中心',
+          showCancel: false,
+          success: () => {
+            Taro.navigateBack({
+              fail: () => {
+                Taro.switchTab({url: '/pages/index/index'})
+              }
+            })
+          }
+        })
+      }
+    } catch (error) {
+      console.error('加载用户信息失败:', error)
+      Taro.showToast({
+        title: '加载失败',
+        icon: 'none'
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [user])
+
+  useDidShow(() => {
+    loadProfile()
+  })
+
+  if (loading) {
+    return (
+      <View style={{background: 'linear-gradient(to bottom, #e0f2fe, #f0f9ff)', minHeight: '100vh'}}>
+        <ScrollView scrollY className="h-screen box-border" style={{background: 'transparent'}}>
+          <View className="p-4 space-y-4">
+            <PageHeader icon="i-mdi-cog" title="配置中心" description="系统配置集中管理" />
+            <LoadingCards count={5} />
+          </View>
+        </ScrollView>
+      </View>
+    )
+  }
+
+  if (!hasPermission) {
+    return (
+      <View style={{background: 'linear-gradient(to bottom, #e0f2fe, #f0f9ff)', minHeight: '100vh'}}>
+        <ScrollView scrollY className="h-screen box-border" style={{background: 'transparent'}}>
+          <View className="p-4 space-y-4">
+            <PageHeader icon="i-mdi-cog" title="配置中心" description="系统配置集中管理" />
+            <EmptyState
+              icon="i-mdi-shield-lock"
+              title="权限不足"
+              description="只有管理员可以访问配置中心"
+              action={{
+                label: '返回首页',
+                onClick: () => Taro.switchTab({url: '/pages/index/index'})
+              }}
+            />
+          </View>
+        </ScrollView>
+      </View>
+    )
+  }
+
+  return (
+    <View style={{background: 'linear-gradient(to bottom, #e0f2fe, #f0f9ff)', minHeight: '100vh'}}>
+      <ScrollView scrollY className="box-border" style={{height: '100vh', background: 'transparent'}}>
+        <View className="p-4">
+          {/* 页面标题 */}
+          <PageHeader icon="i-mdi-cog" title="配置中心" description="系统配置集中管理" />
+
+          {/* 统计卡片 */}
+          <View className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-6 mb-6 shadow-lg">
+            <View className="flex items-center justify-between">
+              <View>
+                <Text className="text-white text-lg font-bold mb-2">欢迎，{profile?.phone || '管理员'}</Text>
+                <Text className="text-white/80 text-sm">您可以在这里管理所有系统配置</Text>
+              </View>
+              <View className="i-mdi-shield-check text-5xl text-white/30" />
+            </View>
+          </View>
+
+          {/* 🎯 排班配置 */}
+          <ConfigSection title="排班配置" icon="i-mdi-calendar-clock" color="text-blue-600">
+            <ConfigItem
+              title="排班管理"
+              description="创建和管理员工排班计划"
+              url="/pages/scheduling/index"
+              icon="i-mdi-calendar-month"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="排班中心"
+              description="查看和调整排班安排"
+              url="/pages/schedule-center/index"
+              icon="i-mdi-calendar-check"
+              color="text-green-500"
+            />
+            <ConfigItem
+              title="排班日志"
+              description="查看排班历史和统计"
+              url="/pages/schedule-logs/index"
+              icon="i-mdi-history"
+              color="text-purple-500"
+            />
+            <ConfigItem
+              title="排班规则配置"
+              description="设置排班规则和约束条件"
+              url="/pages/config-schedule-rules/index"
+              icon="i-mdi-cog"
+              color="text-orange-500"
+            />
+          </ConfigSection>
+
+          {/* 🏢 基础配置 */}
+          <ConfigSection title="基础配置" icon="i-mdi-office-building" color="text-green-600">
+            <ConfigItem
+              title="租户设置"
+              description="管理租户基本信息和设置"
+              url="/packageD/pages/tenant-settings/index"
+              icon="i-mdi-office-building"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="门店管理"
+              description="添加、编辑和管理门店信息"
+              url="/packageD/pages/store-management/index"
+              icon="i-mdi-store"
+              color="text-green-500"
+            />
+            <ConfigItem
+              title="部门管理"
+              description="组织架构和部门设置"
+              url="/packageD/pages/department-management/index"
+              icon="i-mdi-sitemap"
+              color="text-purple-500"
+            />
+            <ConfigItem
+              title="职位管理"
+              description="配置职位信息和职级体系"
+              url="/packageD/pages/position-management/index"
+              icon="i-mdi-briefcase"
+              color="text-cyan-500"
+            />
+          </ConfigSection>
+
+          {/* 💼 业务配置 */}
+          <ConfigSection title="业务配置" icon="i-mdi-briefcase" color="text-purple-600">
+            <ConfigItem
+              title="考勤规则"
+              description="设置打卡时间、迟到早退规则"
+              url="/pages/config-attendance/index"
+              icon="i-mdi-clock-outline"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="请假规则"
+              description="配置请假类型、额度和审批流程"
+              url="/pages/config-leave/index"
+              icon="i-mdi-calendar-remove"
+              color="text-orange-500"
+            />
+            <ConfigItem
+              title="加班规则"
+              description="设置加班申请和补偿规则"
+              url="/pages/config-overtime/index"
+              icon="i-mdi-clock-plus"
+              color="text-red-500"
+            />
+            <ConfigItem
+              title="绩效规则"
+              description="配置绩效考核标准和周期"
+              url="/pages/config-performance/index"
+              icon="i-mdi-chart-line"
+              color="text-green-500"
+            />
+            <ConfigItem
+              title="薪酬规则"
+              description="设置薪资结构和计算规则"
+              url="/pages/config-salary/index"
+              icon="i-mdi-currency-usd"
+              color="text-yellow-500"
+            />
+            <ConfigItem
+              title="技能管理"
+              description="配置技能分类和等级标准"
+              url="/pages/config-skills/index"
+              icon="i-mdi-star"
+              color="text-purple-500"
+            />
+          </ConfigSection>
+
+          {/* 🔄 流程配置 */}
+          <ConfigSection title="流程配置" icon="i-mdi-workflow" color="text-orange-600">
+            <ConfigItem
+              title="入职流程模板"
+              description="配置入职任务和流程步骤"
+              url="/pages/config-onboarding/index"
+              icon="i-mdi-account-plus"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="试用期配置"
+              description="设置试用期时长和考核标准"
+              url="/pages/config-probation/index"
+              icon="i-mdi-account-clock"
+              color="text-cyan-500"
+            />
+            <ConfigItem
+              title="培训配置"
+              description="管理培训课程和培训计划"
+              url="/pages/training-admin/index"
+              icon="i-mdi-school"
+              color="text-green-500"
+            />
+            <ConfigItem
+              title="离职流程模板"
+              description="设置离职审批和交接流程"
+              url="/pages/config-offboarding/index"
+              icon="i-mdi-account-minus"
+              color="text-red-500"
+            />
+            <ConfigItem
+              title="审批流程配置"
+              description="自定义各类审批流程"
+              url="/pages/config-approval/index"
+              icon="i-mdi-file-check"
+              color="text-purple-500"
+            />
+          </ConfigSection>
+
+          {/* 👥 招聘配置 */}
+          <ConfigSection title="招聘配置" icon="i-mdi-account-search" color="text-cyan-600">
+            <ConfigItem
+              title="招聘管理"
+              description="管理招聘职位和候选人"
+              url="/pages/recruitment/index"
+              icon="i-mdi-briefcase-search"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="面试管理"
+              description="安排和管理面试流程"
+              url="/pages/interview-management/index"
+              icon="i-mdi-account-voice"
+              color="text-green-500"
+            />
+            <ConfigItem
+              title="招聘渠道配置"
+              description="配置招聘渠道和来源"
+              url="/pages/config-recruitment-channels/index"
+              icon="i-mdi-source-branch"
+              color="text-purple-500"
+            />
+          </ConfigSection>
+
+          {/* ⚙️ 系统配置 */}
+          <ConfigSection title="系统配置" icon="i-mdi-cog-outline" color="text-gray-600">
+            <ConfigItem
+              title="权限管理"
+              description="配置用户权限和访问控制"
+              url="/pages/config-permissions/index"
+              icon="i-mdi-shield-account"
+              color="text-purple-500"
+            />
+            <ConfigItem
+              title="角色管理"
+              description="创建和管理用户角色"
+              url="/pages/config-roles/index"
+              icon="i-mdi-account-group"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="通知配置"
+              description="设置系统通知和提醒规则"
+              url="/pages/config-notifications/index"
+              icon="i-mdi-bell"
+              color="text-orange-500"
+            />
+            <ConfigItem
+              title="系统参数"
+              description="系统全局参数设置"
+              url="/pages/config-system/index"
+              icon="i-mdi-tune"
+              color="text-gray-500"
+            />
+          </ConfigSection>
+
+          {/* 📊 数据管理 */}
+          <ConfigSection title="数据管理" icon="i-mdi-database" color="text-indigo-600">
+            <ConfigItem
+              title="数据备份"
+              description="备份和恢复系统数据"
+              url="/pages/data-backup/index"
+              icon="i-mdi-backup-restore"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="数据导入导出"
+              description="批量导入导出数据"
+              url="/pages/data-import-export/index"
+              icon="i-mdi-file-import"
+              color="text-green-500"
+            />
+            <ConfigItem
+              title="操作日志"
+              description="查看系统操作记录"
+              url="/pages/operation-logs/index"
+              icon="i-mdi-history"
+              color="text-gray-500"
+            />
+            <ConfigItem
+              title="数据统计"
+              description="查看系统数据统计和分析"
+              url="/pages/analytics/index"
+              icon="i-mdi-chart-bar"
+              color="text-purple-500"
+            />
+          </ConfigSection>
+
+          {/* 📱 应用配置 */}
+          <ConfigSection title="应用配置" icon="i-mdi-application-cog" color="text-pink-600">
+            <ConfigItem
+              title="公告管理"
+              description="发布和管理系统公告"
+              url="/pages/announcement-management/index"
+              icon="i-mdi-bullhorn"
+              color="text-red-500"
+            />
+            <ConfigItem
+              title="帮助文档"
+              description="编辑和管理帮助文档"
+              url="/pages/help-management/index"
+              icon="i-mdi-help-circle"
+              color="text-blue-500"
+            />
+            <ConfigItem
+              title="版本管理"
+              description="查看和管理应用版本"
+              url="/pages/version-management/index"
+              icon="i-mdi-update"
+              color="text-green-500"
+            />
+          </ConfigSection>
+
+          <View className="h-20" />
+        </View>
+      </ScrollView>
+    </View>
+  )
+}

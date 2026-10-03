@@ -1,0 +1,407 @@
+import {Button, Input, Picker, Text, View} from '@tarojs/components'
+import Taro, {useDidShow} from '@tarojs/taro'
+import {useAuth} from 'miaoda-auth-taro'
+import {useCallback, useEffect, useState} from 'react'
+import {
+  calculateRevenueZone,
+  getDailyOperation,
+  getStoreEfficiencyStandard,
+  getStoresByTenantId,
+  getTenantSettings,
+  upsertDailyOperation
+} from '@/db/api'
+import type {EfficiencyStandard, Store, TenantSettings} from '@/db/types'
+import {useTenantStore} from '@/store/tenant'
+
+export default function SchedulePlanning() {
+  const {user} = useAuth({guard: true})
+  const currentTenant = useTenantStore((state) => state.currentTenant)
+  const [stores, setStores] = useState<Store[]>([])
+  const [selectedStoreIndex, setSelectedStoreIndex] = useState(0)
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
+  const [estimatedRevenue, setEstimatedRevenue] = useState('')
+  const [plannedStaffCount, setPlannedStaffCount] = useState('') // 改为人数
+  const [plannedPartTimeHours, setPlannedPartTimeHours] = useState('') // 兼职工时
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [standard, setStandard] = useState<EfficiencyStandard | null>(null)
+  const [tenantSettings, setTenantSettings] = useState<TenantSettings | null>(null)
+  const [zoneInfo, setZoneInfo] = useState<{
+    zone: string
+    zoneName: string
+    efficiencyStandard: number
+    managementMotto: string
+    targetStaffCount: number // 改为人数
+    targetTotalHours: number // 总工时
+  } | null>(null)
+
+  // 加载店铺列表
+  const loadStores = useCallback(async () => {
+    if (!currentTenant?.id) return
+    const storeList = await getStoresByTenantId(currentTenant?.id)
+    setStores(storeList)
+  }, [currentTenant?.id])
+
+  // 加载租户配置
+  const loadTenantSettings = useCallback(async () => {
+    if (!currentTenant?.id) return
+    const settings = await getTenantSettings(currentTenant?.id)
+    setTenantSettings(settings)
+  }, [currentTenant?.id])
+
+  // 加载效能标准
+  const loadStandard = useCallback(async () => {
+    if (!currentTenant?.id || !stores[selectedStoreIndex]?.id) return
+
+    const config = await getStoreEfficiencyStandard(currentTenant?.id, stores[selectedStoreIndex].id)
+    setStandard(config)
+  }, [currentTenant?.id, stores, selectedStoreIndex])
+
+  // 加载已有的运营记录
+  const loadOperation = useCallback(async () => {
+    if (!currentTenant?.id || !stores[selectedStoreIndex]?.id || !selectedDate) return
+
+    setLoading(true)
+    try {
+      const operation = await getDailyOperation(currentTenant?.id, stores[selectedStoreIndex].id, selectedDate)
+      if (operation) {
+        setEstimatedRevenue(operation.estimated_revenue?.toString() || '')
+        setPlannedStaffCount(operation.planned_staff_count?.toString() || '')
+        setPlannedPartTimeHours(operation.planned_part_time_hours?.toString() || '0')
+      } else {
+        setEstimatedRevenue('')
+        setPlannedStaffCount('')
+        setPlannedPartTimeHours('0')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [currentTenant?.id, stores, selectedStoreIndex, selectedDate])
+
+  // 计算营收区间信息
+  useEffect(() => {
+    if (estimatedRevenue && standard && tenantSettings) {
+      const revenue = Number(estimatedRevenue)
+      if (revenue > 0) {
+        const info = calculateRevenueZone(revenue, standard)
+        const dailyHours = tenantSettings.default_daily_work_hours || 8
+        // 计算目标人数 = 目标总工时 / 每日工作小时数
+        const targetStaffCount = Math.ceil(info.targetWorkHours / dailyHours)
+        
+        setZoneInfo({
+          ...info,
+          targetStaffCount,
+          targetTotalHours: info.targetWorkHours
+        })
+        
+        // 自动填充目标人数
+        if (!plannedStaffCount) {
+          setPlannedStaffCount(targetStaffCount.toString())
+        }
+      } else {
+        setZoneInfo(null)
+      }
+    } else {
+      setZoneInfo(null)
+    }
+  }, [estimatedRevenue, standard, tenantSettings, plannedStaffCount])
+
+  // 保存排班规划
+  const handleSave = async () => {
+    console.log('=== 开始保存排班规划 ===')
+    console.log('当前租户:', currentTenant)
+    console.log('当前用户:', user)
+    console.log('选中的店铺:', stores[selectedStoreIndex])
+
+    if (!currentTenant?.id || !stores[selectedStoreIndex]?.id) {
+      console.error('缺少必要信息: tenant_id或store_id为空')
+      Taro.showToast({title: '缺少必要信息', icon: 'none'})
+      return
+    }
+
+    if (!estimatedRevenue || !plannedStaffCount) {
+      console.warn('用户未填写完整信息')
+      Taro.showToast({title: '请填写完整信息', icon: 'none'})
+      return
+    }
+
+    const revenue = Number(estimatedRevenue)
+    const staffCount = Number(plannedStaffCount)
+
+    if (revenue <= 0 || staffCount <= 0) {
+      console.warn('数值无效:', {revenue, staffCount})
+      Taro.showToast({title: '请输入有效的数值', icon: 'none'})
+      return
+    }
+
+    const operationData = {
+      tenant_id: currentTenant?.id,
+      store_id: stores[selectedStoreIndex].id,
+      operation_date: selectedDate,
+      estimated_revenue: revenue,
+      planned_staff_count: staffCount
+    }
+
+    console.log('准备保存的数据:', operationData)
+
+    setSaving(true)
+    try {
+      const result = await upsertDailyOperation(operationData)
+
+      console.log('保存结果:', result)
+
+      if (result) {
+        Taro.showToast({title: '保存成功', icon: 'success'})
+      } else {
+        console.error('保存失败：API返回null')
+        Taro.showToast({
+          title: '保存失败，请查看控制台了解详情',
+          icon: 'none',
+          duration: 3000
+        })
+      }
+    } catch (err) {
+      console.error('保存排班规划时发生异常:', err)
+      Taro.showToast({
+        title: `保存失败: ${err instanceof Error ? err.message : '未知错误'}`,
+        icon: 'none',
+        duration: 3000
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  useEffect(() => {
+    loadStores()
+    loadTenantSettings()
+  }, [loadStores, loadTenantSettings])
+
+  useEffect(() => {
+    if (stores.length > 0) {
+      loadStandard()
+      loadOperation()
+    }
+  }, [stores, loadStandard, loadOperation])
+
+  useDidShow(() => {
+    loadStores()
+    loadTenantSettings()
+  })
+
+  const getZoneColor = (zone: string) => {
+    switch (zone) {
+      case 'low':
+        return 'text-red-600'
+      case 'normal':
+        return 'text-blue-600'
+      case 'high':
+        return 'text-green-600'
+      default:
+        return 'text-gray-600'
+    }
+  }
+
+  const getZoneBgColor = (zone: string) => {
+    switch (zone) {
+      case 'low':
+        return 'bg-red-50'
+      case 'normal':
+        return 'bg-blue-50'
+      case 'high':
+        return 'bg-green-50'
+      default:
+        return 'bg-gray-50'
+    }
+  }
+
+  return (
+    <View style={{background: 'linear-gradient(to bottom, #dbeafe, #eff6ff)', minHeight: '100vh'}}>
+      <View className="p-4">
+        {/* 店铺和日期选择 */}
+        <View className="bg-white rounded-lg p-4 mb-4 shadow-sm">
+          <View className="mb-3">
+            <Text className="text-sm text-gray-600 mb-2">选择店铺</Text>
+            <Picker
+              mode="selector"
+              range={stores.map((s) => s.name)}
+              value={selectedStoreIndex}
+              onChange={(e) => setSelectedStoreIndex(Number(e.detail.value))}>
+              <View className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <Text className="text-gray-700">{stores[selectedStoreIndex]?.name || '请选择店铺'}</Text>
+                <View className="i-mdi-chevron-down text-xl text-gray-400" />
+              </View>
+            </Picker>
+          </View>
+
+          <View>
+            <Text className="text-sm text-gray-600 mb-2">选择日期</Text>
+            <Picker mode="date" value={selectedDate} onChange={(e) => setSelectedDate(e.detail.value)}>
+              <View className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <Text className="text-gray-700">{selectedDate}</Text>
+                <View className="i-mdi-calendar text-xl text-gray-400" />
+              </View>
+            </Picker>
+          </View>
+        </View>
+
+        {loading ? (
+          <View className="bg-white rounded-lg p-8 text-center">
+            <Text className="text-gray-500">加载中...</Text>
+          </View>
+        ) : (
+          <>
+            {/* 效能标准检查提示 */}
+            {!standard && (
+              <View className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                <View className="flex items-center mb-2">
+                  <View className="i-mdi-alert text-2xl text-yellow-600 mr-2" />
+                  <Text className="text-base font-semibold text-yellow-800">未配置效能标准</Text>
+                </View>
+                <Text className="text-sm text-yellow-700 mb-2">当前店铺尚未配置效能标准，无法自动计算目标工时。</Text>
+                <Button
+                  size="mini"
+                  className="bg-yellow-500 text-white"
+                  onClick={() => Taro.navigateTo({url: '/pages/efficiency-config/index'})}>
+                  <Text className="text-xs">前往配置</Text>
+                </Button>
+              </View>
+            )}
+
+            {/* 预估营收输入 */}
+            <View className="bg-white rounded-lg p-4 mb-4 shadow-sm">
+              <View className="flex items-center mb-3">
+                <View className="i-mdi-cash text-2xl text-blue-500 mr-2" />
+                <Text className="text-base font-semibold text-gray-800">第一步：预估营收</Text>
+              </View>
+
+              <View className="mb-2">
+                <Text className="text-sm text-gray-600 mb-2">预估次日营收（元）</Text>
+                <Input
+                  type="digit"
+                  value={estimatedRevenue}
+                  onInput={(e) => setEstimatedRevenue(e.detail.value)}
+                  placeholder="请输入预估营收"
+                  className="border border-gray-300 rounded-lg p-3 bg-gray-50 text-lg"
+                />
+              </View>
+
+              {estimatedRevenue && (
+                <View className="bg-blue-50 rounded-lg p-3 mt-3">
+                  <Text className="text-sm text-blue-700">
+                    💡 预估营收：¥{Number(estimatedRevenue).toLocaleString()}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* 查表结果 */}
+            {zoneInfo && (
+              <View className={`rounded-lg p-4 mb-4 shadow-sm ${getZoneBgColor(zoneInfo.zone)}`}>
+                <View className="flex items-center mb-3">
+                  <View className="i-mdi-table-search text-2xl text-gray-700 mr-2" />
+                  <Text className="text-base font-semibold text-gray-800">第二步：查表结果</Text>
+                </View>
+
+                <View className="space-y-3">
+                  <View className="flex items-center justify-between">
+                    <Text className="text-sm text-gray-600">所属区间</Text>
+                    <Text className={`text-base font-semibold ${getZoneColor(zoneInfo.zone)}`}>
+                      {zoneInfo.zoneName}
+                    </Text>
+                  </View>
+
+                  <View className="flex items-center justify-between">
+                    <Text className="text-sm text-gray-600">效能标准</Text>
+                    <Text className="text-base font-semibold text-gray-800">{zoneInfo.efficiencyStandard}元/人/日</Text>
+                  </View>
+
+                  <View className="flex items-center justify-between">
+                    <Text className="text-sm text-gray-600">目标工时</Text>
+                    <Text className="text-lg font-bold text-blue-600">{zoneInfo.targetWorkHours}小时</Text>
+                  </View>
+
+                  <View className="bg-white bg-opacity-70 rounded-lg p-3 mt-2">
+                    <Text className="text-sm font-semibold text-gray-700 mb-1">管理口令</Text>
+                    <Text className="text-base text-gray-800">{zoneInfo.managementMotto}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* 排班工时输入 - 始终显示 */}
+            <View className="bg-white rounded-lg p-4 mb-4 shadow-sm">
+              <View className="flex items-center mb-3">
+                <View className="i-mdi-clock-outline text-2xl text-green-500 mr-2" />
+                <Text className="text-base font-semibold text-gray-800">
+                  {zoneInfo ? '第三步：排班工时' : '第二步：排班工时'}
+                </Text>
+              </View>
+
+              <View className="mb-2">
+                <Text className="text-sm text-gray-600 mb-2">计划排班工时（小时）</Text>
+                <Input
+                  type="digit"
+                  value={plannedStaffCount}
+                  onInput={(e) => setPlannedWorkHours(e.detail.value)}
+                  placeholder="请输入计划工时"
+                  className="border border-gray-300 rounded-lg p-3 bg-gray-50 text-lg"
+                />
+              </View>
+
+              {plannedStaffCount && zoneInfo && (
+                <View className="mt-3">
+                  {Number(plannedStaffCount) <= zoneInfo.targetWorkHours ? (
+                    <View className="bg-green-50 rounded-lg p-3">
+                      <Text className="text-sm text-green-700">✅ 优秀！排班工时在目标范围内</Text>
+                    </View>
+                  ) : (
+                    <View className="bg-yellow-50 rounded-lg p-3">
+                      <Text className="text-sm text-yellow-700">
+                        ⚠️ 注意：排班工时超出目标 {(Number(plannedStaffCount) - zoneInfo.targetWorkHours).toFixed(1)}
+                        小时
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {plannedStaffCount && !zoneInfo && (
+                <View className="bg-blue-50 rounded-lg p-3 mt-3">
+                  <Text className="text-sm text-blue-700">💡 计划工时：{Number(plannedStaffCount)}小时</Text>
+                </View>
+              )}
+            </View>
+
+            {/* 排班建议 */}
+            {zoneInfo && (
+              <View className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 mb-4">
+                <Text className="text-sm font-semibold text-gray-800 mb-2">📋 排班建议</Text>
+                <View className="mb-1">
+                  <Text className="text-xs text-gray-700">• 排班总工时不得超过{zoneInfo.targetWorkHours}小时</Text>
+                </View>
+                <View className="mb-1">
+                  <Text className="text-xs text-gray-700">• 应尽可能优化，向目标工时靠近</Text>
+                </View>
+                <View>
+                  <Text className="text-xs text-gray-700">• 合理安排班次，确保服务质量</Text>
+                </View>
+              </View>
+            )}
+
+            {/* 保存按钮 */}
+            <Button
+              onClick={handleSave}
+              loading={saving}
+              disabled={!estimatedRevenue || !plannedStaffCount}
+              className="bg-blue-500 text-white rounded-lg w-full">
+              <Text className="text-base">
+                {!estimatedRevenue || !plannedStaffCount ? '请填写完整信息' : '保存排班规划'}
+              </Text>
+            </Button>
+          </>
+        )}
+      </View>
+    </View>
+  )
+}

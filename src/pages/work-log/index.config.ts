@@ -1,0 +1,4 @@
+export default {
+  navigationBarTitleText: '工作记录',
+  enablePullDownRefresh: true
+}

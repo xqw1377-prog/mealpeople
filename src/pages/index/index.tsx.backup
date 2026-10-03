@@ -1,0 +1,806 @@
+/**
+ * 员工工作台页面
+ * 按照三大框架组织：入职管理、在职管理、离职管理
+ * 设计理念：简洁、高效、便捷
+ *
+ * 核心功能：
+ * - 信息交互仪表盘（首要区域）
+ * - 入职管理（4个功能）
+ * - 在职管理（8个功能）
+ * - 离职管理（4个功能）
+ * - 今日数据概览
+ */
+
+import {ScrollView, Text, View} from '@tarojs/components'
+import Taro, {useDidShow} from '@tarojs/taro'
+import {useAuth} from 'miaoda-auth-taro'
+import type React from 'react'
+import {useCallback, useState} from 'react'
+import InfoDashboard from '@/components/info-dashboard/InfoDashboard'
+import {getEmployeeByUserId} from '@/db/api'
+import type {Employee} from '@/db/types'
+import {useTenantStore} from '@/store/tenant'
+
+// 快捷操作配置
+interface QuickAction {
+  id: string
+  name: string
+  icon: string
+  iconColor: string
+  bgColor: string
+  path: string
+}
+
+// 入职管理快捷操作
+const ONBOARDING_ACTIONS: QuickAction[] = [
+  {
+    id: 'interview',
+    name: '我的面试',
+    icon: 'i-mdi-calendar-account',
+    iconColor: 'text-blue-600',
+    bgColor: 'bg-blue-50',
+    path: '/pages/onboarding/interview/index'
+  },
+  {
+    id: 'onboarding',
+    name: '我的入职',
+    icon: 'i-mdi-account-check',
+    iconColor: 'text-green-600',
+    bgColor: 'bg-green-50',
+    path: '/pages/onboarding/onboarding/index'
+  },
+  {
+    id: 'training',
+    name: '我的培训',
+    icon: 'i-mdi-school',
+    iconColor: 'text-purple-600',
+    bgColor: 'bg-purple-50',
+    path: '/pages/onboarding/training/index'
+  },
+  {
+    id: 'probation',
+    name: '试用期',
+    icon: 'i-mdi-clock-check',
+    iconColor: 'text-orange-600',
+    bgColor: 'bg-orange-50',
+    path: '/pages/onboarding/probation/index'
+  }
+]
+
+// 在职管理快捷操作
+const WORKING_ACTIONS: QuickAction[] = [
+  {
+    id: 'attendance',
+    name: '我的考勤',
+    icon: 'i-mdi-clock-time-four',
+    iconColor: 'text-blue-600',
+    bgColor: 'bg-blue-50',
+    path: '/pages/working/attendance/index'
+  },
+  {
+    id: 'work-log',
+    name: '工作日志',
+    icon: 'i-mdi-notebook',
+    iconColor: 'text-green-600',
+    bgColor: 'bg-green-50',
+    path: '/pages/work-log/index'
+  },
+  {
+    id: 'skill',
+    name: '我的技能',
+    icon: 'i-mdi-star',
+    iconColor: 'text-yellow-600',
+    bgColor: 'bg-yellow-50',
+    path: '/pages/working/skill/index'
+  },
+  {
+    id: 'performance',
+    name: '我的绩效',
+    icon: 'i-mdi-chart-line',
+    iconColor: 'text-purple-600',
+    bgColor: 'bg-purple-50',
+    path: '/pages/working/performance/index'
+  },
+  {
+    id: 'leave',
+    name: '我的请假',
+    icon: 'i-mdi-beach',
+    iconColor: 'text-cyan-600',
+    bgColor: 'bg-cyan-50',
+    path: '/pages/working/leave/index'
+  },
+  {
+    id: 'overtime',
+    name: '我的加班',
+    icon: 'i-mdi-moon-waning-crescent',
+    iconColor: 'text-indigo-600',
+    bgColor: 'bg-indigo-50',
+    path: '/pages/working/overtime/index'
+  },
+  {
+    id: 'salary',
+    name: '我的薪酬',
+    icon: 'i-mdi-cash',
+    iconColor: 'text-green-600',
+    bgColor: 'bg-green-50',
+    path: '/pages/working/salary/index'
+  },
+  {
+    id: 'promotion',
+    name: '我的晋升',
+    icon: 'i-mdi-trending-up',
+    iconColor: 'text-red-600',
+    bgColor: 'bg-red-50',
+    path: '/pages/working/promotion/index'
+  },
+  {
+    id: 'transfer',
+    name: '我的调岗',
+    icon: 'i-mdi-swap-horizontal',
+    iconColor: 'text-orange-600',
+    bgColor: 'bg-orange-50',
+    path: '/pages/working/transfer/index'
+  }
+]
+
+// 离职管理快捷操作
+const OFFBOARDING_ACTIONS: QuickAction[] = [
+  {
+    id: 'resignation',
+    name: '离职申请',
+    icon: 'i-mdi-file-document-edit',
+    iconColor: 'text-red-600',
+    bgColor: 'bg-red-50',
+    path: '/pages/offboarding/resignation/index'
+  },
+  {
+    id: 'handover',
+    name: '工作交接',
+    icon: 'i-mdi-swap-horizontal-circle',
+    iconColor: 'text-orange-600',
+    bgColor: 'bg-orange-50',
+    path: '/pages/offboarding/handover/index'
+  },
+  {
+    id: 'exit',
+    name: '离职手续',
+    icon: 'i-mdi-clipboard-check',
+    iconColor: 'text-purple-600',
+    bgColor: 'bg-purple-50',
+    path: '/pages/offboarding/exit/index'
+  },
+  {
+    id: 'alumni',
+    name: '校友网络',
+    icon: 'i-mdi-account-group',
+    iconColor: 'text-blue-600',
+    bgColor: 'bg-blue-50',
+    path: '/pages/offboarding/alumni/index'
+  }
+]
+
+const QUICK_ACTIONS: QuickAction[] = [
+  {
+    id: 'smart-schedule',
+    name: '排班管理',
+    icon: 'i-mdi-calendar-multiple',
+    iconColor: 'text-purple-600',
+    bgColor: 'bg-purple-50',
+    path: '/pages/schedule-center/index'
+  },
+  {
+    id: 'my-schedule',
+    name: '我的班次',
+    icon: 'i-mdi-calendar-today',
+    iconColor: 'text-blue-600',
+    bgColor: 'bg-blue-50',
+    path: '/pages/scheduling/index'
+  },
+  {
+    id: 'work-log',
+    name: '工作记录',
+    icon: 'i-mdi-notebook-edit',
+    iconColor: 'text-green-600',
+    bgColor: 'bg-green-50',
+    path: '/pages/work-logs/index'
+  },
+  {
+    id: 'attendance',
+    name: '考勤打卡',
+    icon: 'i-mdi-clock-check',
+    iconColor: 'text-orange-600',
+    bgColor: 'bg-orange-50',
+    path: '/pages/attendance/index'
+  },
+  {
+    id: 'leave',
+    name: '我的请假',
+    icon: 'i-mdi-calendar-clock',
+    iconColor: 'text-teal-600',
+    bgColor: 'bg-teal-50',
+    path: '/pages/my-leave/index'
+  },
+  {
+    id: 'overtime',
+    name: '我的加班',
+    icon: 'i-mdi-clock-plus',
+    iconColor: 'text-amber-600',
+    bgColor: 'bg-amber-50',
+    path: '/pages/my-overtime/index'
+  },
+  {
+    id: 'salary',
+    name: '我的薪酬',
+    icon: 'i-mdi-cash',
+    iconColor: 'text-emerald-600',
+    bgColor: 'bg-emerald-50',
+    path: '/pages/my-salary/index'
+  },
+  {
+    id: 'promotion',
+    name: '我的晋升',
+    icon: 'i-mdi-trending-up',
+    iconColor: 'text-rose-600',
+    bgColor: 'bg-rose-50',
+    path: '/pages/my-promotion/index'
+  },
+  {
+    id: 'transfer',
+    name: '我的调岗',
+    icon: 'i-mdi-swap-horizontal',
+    iconColor: 'text-cyan-600',
+    bgColor: 'bg-cyan-50',
+    path: '/pages/my-transfer/index'
+  },
+  {
+    id: 'offboarding',
+    name: '我的离职',
+    icon: 'i-mdi-account-arrow-right',
+    iconColor: 'text-red-600',
+    bgColor: 'bg-red-50',
+    path: '/pages/my-offboarding/index'
+  },
+  {
+    id: 'performance',
+    name: '我的绩效',
+    icon: 'i-mdi-trophy',
+    iconColor: 'text-yellow-600',
+    bgColor: 'bg-yellow-50',
+    path: '/pages/my-performance/index'
+  },
+  {
+    id: 'growth',
+    name: '我的成长',
+    icon: 'i-mdi-school',
+    iconColor: 'text-indigo-600',
+    bgColor: 'bg-indigo-50',
+    path: '/pages/my-growth/index'
+  }
+]
+
+const EmployeeWorkspace: React.FC = () => {
+  const {user} = useAuth({guard: true})
+  const currentTenant = useTenantStore((state) => state.currentTenant)
+
+  // 员工信息
+  const [employee, setEmployee] = useState<Employee | null>(null)
+
+  // 工作台统计数据
+  const [stats, setStats] = useState<WorkspaceStats | null>(null)
+
+  // 通知统计数据
+  const [notificationStats, setNotificationStats] = useState<NotificationStats>({
+    total: 0,
+    unread: 0,
+    byType: {task: 0, training: 0, schedule: 0, system: 0}
+  })
+
+  // 加载状态
+  const [loading, setLoading] = useState(true)
+
+  console.log(
+    'EmployeeWorkspace 组件渲染，用户:',
+    user,
+    '租户:',
+    currentTenant,
+    '员工:',
+    employee,
+    '加载状态:',
+    loading
+  )
+
+  // 获取问候语
+  const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour < 6) return '夜深了'
+    if (hour < 9) return '早上好'
+    if (hour < 12) return '上午好'
+    if (hour < 14) return '中午好'
+    if (hour < 18) return '下午好'
+    if (hour < 22) return '晚上好'
+    return '夜深了'
+  }
+
+  // 获取日期字符串
+  const getDateString = () => {
+    const date = new Date()
+    const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    const year = date.getFullYear()
+    const month = date.getMonth() + 1
+    const day = date.getDate()
+    const weekDay = weekDays[date.getDay()]
+
+    return `${year}年${month}月${day}日 ${weekDay}`
+  }
+
+  // 加载员工信息
+  const loadEmployee = useCallback(async () => {
+    if (!user?.id) {
+      console.log('用户ID不存在，等待登录')
+      return
+    }
+
+    try {
+      console.log('开始加载员工信息，用户ID:', user.id)
+      const data = await getEmployeeByUserId(user.id)
+      console.log('员工信息加载成功:', data)
+      setEmployee(data)
+    } catch (error) {
+      console.error('加载员工信息失败:', error)
+      // 如果加载失败，使用模拟数据，确保页面能正常显示
+      const mockEmployee: Employee = {
+        id: user.id,
+        name: '员工',
+        user_id: user.id,
+        tenant_id: '',
+        store_id: '',
+        brand_id: null,
+        phone: null,
+        employee_type: 'full_time',
+        department: 'front_hall',
+        position: '员工',
+        status: 'active',
+        monthly_salary: null,
+        daily_work_hours: null,
+        rest_days_per_month: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+      console.log('使用模拟员工数据:', mockEmployee)
+      setEmployee(mockEmployee)
+    }
+  }, [user?.id])
+
+  // 加载工作台数据
+  const loadWorkspaceData = useCallback(async () => {
+    if (!employee?.id || !user?.id) return
+
+    try {
+      setLoading(true)
+      const [statsData, notificationStatsData] = await Promise.all([
+        getWorkspaceStats(employee.id),
+        getNotificationStats(user.id)
+      ])
+      setStats(statsData)
+      setNotificationStats(notificationStatsData)
+    } catch (error) {
+      console.error('加载工作台数据失败:', error)
+      // 如果加载失败，设置空数据，让页面正常显示
+      setStats(null)
+      setNotificationStats({total: 0, unread: 0, byType: {task: 0, training: 0, schedule: 0, system: 0}})
+    } finally {
+      setLoading(false)
+    }
+  }, [employee?.id, user?.id])
+
+  // 页面显示时加载数据
+  useDidShow(() => {
+    console.log('页面显示，用户信息:', user, '租户信息:', currentTenant)
+
+    // 检查租户状态
+    if (!currentTenant?.id) {
+      console.log('❌ 未选择租户，引导用户选择')
+      Taro.showModal({
+        title: '请选择租户',
+        content: '您还没有选择租户，请先选择一个租户以继续使用',
+        confirmText: '去选择',
+        cancelText: '稍后',
+        success: (res) => {
+          if (res.confirm) {
+            Taro.navigateTo({url: '/pages/tenant-select/index'})
+          }
+        }
+      })
+      setLoading(false)
+      return
+    }
+
+    if (user?.id) {
+      loadEmployee()
+    } else {
+      console.log('用户未登录或用户ID不存在')
+      // 设置loading为false，让页面显示基本内容
+      setLoading(false)
+    }
+  })
+
+  // 员工信息加载后，加载工作台数据
+  useEffect(() => {
+    if (employee) {
+      console.log('员工信息已加载，开始加载工作台数据')
+      loadWorkspaceData()
+    } else {
+      console.log('员工信息未加载')
+      // 如果没有员工信息，也要设置loading为false
+      setLoading(false)
+    }
+  }, [employee, loadWorkspaceData])
+
+  // 处理快捷操作点击
+  const handleQuickAction = (action: QuickAction) => {
+    if (action.action) {
+      action.action()
+    } else if (action.path) {
+      // 判断是否是分包页面
+      if (action.path.startsWith('/packageA') || action.path.startsWith('/packageB')) {
+        Taro.navigateTo({url: action.path})
+      } else {
+        // 判断是否是tabBar页面
+        const tabBarPages = ['/pages/home/index', '/pages/tasks/index', '/pages/profile/index']
+        if (tabBarPages.includes(action.path)) {
+          Taro.switchTab({url: action.path})
+        } else {
+          Taro.navigateTo({url: action.path})
+        }
+      }
+    }
+  }
+
+  // 刷新数据
+  const handleRefresh = () => {
+    loadWorkspaceData()
+  }
+
+  // 如果用户未登录，显示加载状态（useAuth会自动跳转到登录页）
+  if (!user) {
+    console.log('用户未登录，显示加载状态')
+    return (
+      <View
+        className="min-h-screen flex items-center justify-center"
+        style={{background: 'linear-gradient(to bottom, #EBF4FF, #FFFFFF)'}}>
+        <View className="text-center">
+          <View className="i-mdi-loading text-4xl text-primary animate-spin mb-4" />
+          <Text className="text-sm text-muted-foreground">正在加载...</Text>
+        </View>
+      </View>
+    )
+  }
+
+  // 如果没有选择租户，显示提示
+  if (!currentTenant?.id) {
+    console.log('未选择租户，显示提示页面')
+    return (
+      <View
+        className="min-h-screen flex items-center justify-center p-6"
+        style={{background: 'linear-gradient(to bottom, #EBF4FF, #FFFFFF)'}}>
+        <View className="bg-white rounded-2xl p-8 shadow-lg text-center max-w-md">
+          <View className="i-mdi-office-building text-6xl text-primary mb-4" />
+          <Text className="text-xl font-bold text-foreground mb-2">请选择租户</Text>
+          <Text className="text-sm text-muted-foreground mb-6">您还没有选择租户，请先选择一个租户以继续使用系统</Text>
+          <View
+            className="bg-primary text-white py-3 px-6 rounded-lg active:opacity-80"
+            onClick={() => Taro.navigateTo({url: '/pages/tenant-select/index'})}>
+            <Text className="text-white text-center font-medium">去选择租户</Text>
+          </View>
+        </View>
+      </View>
+    )
+  }
+
+  return (
+    <View style={{background: 'linear-gradient(to bottom, #EBF4FF, #FFFFFF)', minHeight: '100vh'}}>
+      <ScrollView scrollY className="h-screen box-border" style={{background: 'transparent'}}>
+        <View className="p-4 space-y-4">
+          {/* 顶部问候语 */}
+          <View className="bg-white rounded-2xl p-6 shadow-sm">
+            <View className="flex flex-row items-center justify-between">
+              <View className="flex-1">
+                <Text className="text-2xl font-bold text-primary mb-2">
+                  {getGreeting()}，{employee?.name || '员工'}
+                </Text>
+                <Text className="text-sm text-muted-foreground">{getDateString()}</Text>
+              </View>
+              {/* 未读通知提示 */}
+              {notificationStats.unread > 0 && (
+                <View
+                  className="flex flex-col items-center justify-center bg-red-50 rounded-xl px-4 py-2 active:bg-red-100"
+                  onClick={() => Taro.navigateTo({url: '/pages/notifications/index'})}>
+                  <View className="relative">
+                    <View className="i-mdi-bell text-2xl text-red-600" />
+                    <View className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center">
+                      <Text className="text-xs text-white font-bold">{notificationStats.unread}</Text>
+                    </View>
+                  </View>
+                  <Text className="text-xs text-red-600 mt-1">新消息</Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* 信息交互仪表盘 - 首要区域 */}
+          <InfoDashboard />
+
+          {/* 快捷操作区 - 始终显示 */}
+          <View className="bg-white rounded-2xl p-6 shadow-sm">
+            <View className="flex flex-row items-center justify-between mb-4">
+              <Text className="text-lg font-semibold text-foreground">快捷操作</Text>
+              <View className="i-mdi-lightning-bolt text-2xl text-primary" />
+            </View>
+            <View className="grid grid-cols-3 gap-3">
+              {QUICK_ACTIONS.map((action) => (
+                <View
+                  key={action.id}
+                  className={`${action.bgColor} rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70`}
+                  onClick={() => handleQuickAction(action)}>
+                  <View className={`${action.icon} text-3xl ${action.iconColor} mb-2`} />
+                  <Text className={`text-xs ${action.iconColor} font-medium text-center`}>{action.name}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {loading ? (
+            <View className="bg-white rounded-2xl p-8 shadow-sm">
+              <Text className="text-center text-muted-foreground">加载工作数据中...</Text>
+            </View>
+          ) : (
+            <>
+              {stats?.today_schedule && !stats.today_schedule.is_rest_day && (
+                <View className="bg-gradient-to-r from-blue-50 to-cyan-50 rounded-2xl p-5 shadow-sm">
+                  <View className="flex flex-row items-center justify-between">
+                    <View className="flex-1">
+                      <Text className="text-sm text-muted-foreground mb-1">今日班次</Text>
+                      <Text className="text-lg font-bold text-foreground mb-1">{stats.today_schedule.shift_name}</Text>
+                      <Text className="text-sm text-foreground">
+                        {stats.today_schedule.start_time} - {stats.today_schedule.end_time}
+                      </Text>
+                    </View>
+                    <View className="i-mdi-calendar-check text-4xl text-blue-600" />
+                  </View>
+                </View>
+              )}
+
+              {/* 今日休息提示 */}
+              {stats?.today_schedule?.is_rest_day && (
+                <View className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl p-5 shadow-sm">
+                  <View className="flex flex-row items-center justify-center">
+                    <View className="i-mdi-sleep text-3xl text-green-600 mr-3" />
+                    <Text className="text-lg font-bold text-green-600">今日休息</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* 今日任务卡片 */}
+              <View className="bg-white rounded-2xl p-6 shadow-sm">
+                <View className="flex flex-row items-center justify-between mb-4">
+                  <Text className="text-lg font-semibold text-foreground">今日任务</Text>
+                  <View className="i-mdi-clipboard-check-outline text-2xl text-primary" />
+                </View>
+
+                {stats?.today_tasks && stats.today_tasks.total > 0 ? (
+                  <View>
+                    {/* 任务统计 */}
+                    <View className="flex flex-row items-center justify-between mb-4 p-4 bg-primary/5 rounded-xl">
+                      <View>
+                        <Text className="text-sm text-muted-foreground">总任务</Text>
+                        <Text className="text-2xl font-bold text-foreground">{stats.today_tasks.total}</Text>
+                      </View>
+                      <View>
+                        <Text className="text-sm text-muted-foreground">已完成</Text>
+                        <Text className="text-2xl font-bold text-success">{stats.today_tasks.completed}</Text>
+                      </View>
+                      <View>
+                        <Text className="text-sm text-muted-foreground">待处理</Text>
+                        <Text className="text-2xl font-bold text-warning">{stats.today_tasks.pending}</Text>
+                      </View>
+                    </View>
+
+                    {/* 任务列表 */}
+                    {stats.today_tasks.tasks.length > 0 && (
+                      <View className="space-y-3">
+                        <Text className="text-sm text-muted-foreground mb-2">待处理任务</Text>
+                        {stats.today_tasks.tasks.map((task) => (
+                          <View
+                            key={task.id}
+                            className="p-3 bg-muted/30 rounded-lg"
+                            onClick={() => {
+                              Taro.navigateTo({url: `/pages/task-detail/index?id=${task.id}`})
+                            }}>
+                            <View className="flex flex-row items-start justify-between">
+                              <View className="flex-1">
+                                <Text className="text-base font-medium text-foreground">{task.title}</Text>
+                                {task.due_date && (
+                                  <Text className="text-xs text-muted-foreground mt-1">截止：{task.due_date}</Text>
+                                )}
+                              </View>
+                              <View className="flex flex-row items-center gap-1">
+                                <View
+                                  className={`${TASK_PRIORITY_ICONS[task.priority]} text-lg ${TASK_PRIORITY_COLORS[task.priority]}`}
+                                />
+                                <Text className={`text-xs ${TASK_PRIORITY_COLORS[task.priority]}`}>
+                                  {TASK_PRIORITY_NAMES[task.priority]}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* 查看全部按钮 */}
+                    <View
+                      className="mt-4 py-3 bg-primary/10 rounded-lg text-center"
+                      onClick={() => {
+                        Taro.switchTab({url: '/pages/tasks/index'})
+                      }}>
+                      <Text className="text-primary font-medium">查看全部任务</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View className="text-center py-4">
+                    <View className="i-mdi-check-circle-outline text-4xl text-success mb-2" />
+                    <Text className="text-muted-foreground">今日暂无任务</Text>
+                    <Text className="text-xs text-muted-foreground mt-2">享受轻松的一天吧！</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 本月收入卡片 */}
+              <View className="bg-white rounded-2xl p-6 shadow-sm">
+                <View className="flex flex-row items-center justify-between mb-4">
+                  <Text className="text-lg font-semibold text-foreground">本月收入</Text>
+                  <View className="i-mdi-cash-multiple text-2xl text-primary" />
+                </View>
+
+                {stats?.monthly_income ? (
+                  <View className="space-y-3">
+                    <View className="text-center py-2">
+                      <Text className="text-3xl font-bold text-primary">¥{stats.monthly_income.total.toFixed(2)}</Text>
+                      <Text className="text-sm text-muted-foreground mt-1">预计总收入</Text>
+                    </View>
+
+                    <View className="flex flex-row justify-around pt-3 border-t border-border">
+                      <View className="text-center">
+                        <Text className="text-xl font-semibold text-foreground">{stats.monthly_income.days}</Text>
+                        <Text className="text-xs text-muted-foreground mt-1">工作天数</Text>
+                      </View>
+
+                      <View className="text-center">
+                        <Text className="text-xl font-semibold text-foreground">
+                          ¥{stats.monthly_income.average.toFixed(0)}
+                        </Text>
+                        <Text className="text-xs text-muted-foreground mt-1">日均收入</Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <View className="text-center py-4">
+                    <Text className="text-muted-foreground">暂无收入数据</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 我的成长卡片 */}
+              <View className="bg-white rounded-2xl p-6 shadow-sm">
+                <View className="flex flex-row items-center justify-between mb-4">
+                  <Text className="text-lg font-semibold text-foreground">我的成长</Text>
+                  <View className="i-mdi-chart-line text-2xl text-primary" />
+                </View>
+
+                {stats?.growth_data ? (
+                  <View className="space-y-4">
+                    {/* 技能等级 */}
+                    <View>
+                      <View className="flex flex-row items-center justify-between mb-2">
+                        <Text className="text-sm text-foreground">服务技能</Text>
+                        <Text className="text-sm font-semibold text-primary">{stats.growth_data.skill_level}分</Text>
+                      </View>
+                      <View className="h-2 bg-muted rounded-full overflow-hidden">
+                        <View
+                          className="h-full bg-primary rounded-full"
+                          style={{width: `${stats.growth_data.skill_level}%`}}
+                        />
+                      </View>
+                    </View>
+
+                    {/* 服务评分 */}
+                    <View>
+                      <View className="flex flex-row items-center justify-between mb-2">
+                        <Text className="text-sm text-foreground">服务评分</Text>
+                        <Text className="text-sm font-semibold text-primary">{stats.growth_data.service_score}分</Text>
+                      </View>
+                      <View className="h-2 bg-muted rounded-full overflow-hidden">
+                        <View
+                          className="h-full bg-secondary rounded-full"
+                          style={{width: `${stats.growth_data.service_score}%`}}
+                        />
+                      </View>
+                    </View>
+
+                    {/* 距离晋升 */}
+                    <View className="bg-muted rounded-xl p-4 mt-2">
+                      <Text className="text-sm text-muted-foreground text-center">
+                        距离下一等级还需 {stats.growth_data.next_level} 分
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View className="text-center py-4">
+                    <Text className="text-muted-foreground">暂无成长数据</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 培训学习卡片 */}
+              <View className="bg-white rounded-2xl p-6 shadow-sm">
+                <View className="flex flex-row items-center justify-between mb-4">
+                  <Text className="text-lg font-semibold text-foreground">培训学习</Text>
+                  <View className="i-mdi-school text-2xl text-primary" />
+                </View>
+
+                <View className="space-y-3">
+                  {/* 培训课程入口 */}
+                  <View
+                    className="flex flex-row items-center justify-between p-4 bg-blue-50 rounded-xl active:scale-98 transition-all"
+                    onClick={() => {
+                      Taro.switchTab({url: '/pages/training-courses/index'})
+                    }}>
+                    <View className="flex flex-row items-center gap-3">
+                      <View className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                        <View className="i-mdi-book-open-page-variant text-xl text-blue-600" />
+                      </View>
+                      <View>
+                        <Text className="text-base font-medium text-foreground">浏览课程</Text>
+                        <Text className="text-xs text-muted-foreground mt-1">发现更多学习内容</Text>
+                      </View>
+                    </View>
+                    <View className="i-mdi-chevron-right text-xl text-muted-foreground" />
+                  </View>
+
+                  {/* 我的培训入口 */}
+                  <View
+                    className="flex flex-row items-center justify-between p-4 bg-green-50 rounded-xl active:scale-98 transition-all"
+                    onClick={() => {
+                      Taro.navigateTo({url: '/pages/my-training/index'})
+                    }}>
+                    <View className="flex flex-row items-center gap-3">
+                      <View className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                        <View className="i-mdi-account-school text-xl text-green-600" />
+                      </View>
+                      <View>
+                        <Text className="text-base font-medium text-foreground">我的培训</Text>
+                        <Text className="text-xs text-muted-foreground mt-1">查看学习进度和记录</Text>
+                      </View>
+                    </View>
+                    <View className="i-mdi-chevron-right text-xl text-muted-foreground" />
+                  </View>
+                </View>
+              </View>
+
+              {/* 刷新按钮 */}
+              <View className="pb-4">
+                <View
+                  className="bg-primary text-white py-3 rounded-xl text-center active:scale-98 transition-all"
+                  onClick={handleRefresh}>
+                  <Text className="text-white font-medium">刷新数据</Text>
+                </View>
+              </View>
+            </>
+          )}
+        </View>
+      </ScrollView>
+    </View>
+  )
+}
+
+export default EmployeeWorkspace

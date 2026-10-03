@@ -1,0 +1,139 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+@import 'miaoda-auth-taro/lib/index.css';
+
+/* 全局字体大小优化 */
+page {
+  font-size: 16px; /* 从默认的 14px 增加到 16px */
+}
+
+/* 确保所有文本元素都继承基础字体大小 */
+view, text, button, input, textarea {
+  font-size: inherit;
+}
+
+/* 修复登录输入框文字显示问题 */
+.md-login-form .form-group {
+  min-height: 44px !important; /* 确保输入框有足够的高度 */
+  height: auto !important;
+}
+
+.md-login-form .form-group input,
+.md-login-form .form-group wx-input {
+  color: #151b26 !important; /* 确保文字颜色足够深 */
+  font-size: 16px !important; /* 增大字体，更易读 */
+  line-height: 1.5 !important; /* 确保行高正常 */
+  padding: 12px 0 !important; /* 增加上下padding */
+  height: auto !important;
+  min-height: 20px !important;
+}
+
+/* 确保Taro Input组件的内部元素正确显示 */
+.md-login-form .form-group taro-input-core {
+  height: auto !important;
+  padding: 0 !important;
+  line-height: 1.5 !important;
+}
+
+/* 确保输入框内容可见 */
+.md-login-form .form-group taro-input-core input {
+  color: #151b26 !important;
+  font-size: 16px !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* 修复验证码输入框 */
+.md-login-code-group {
+  min-height: 44px !important;
+  height: auto !important;
+}
+
+.md-login-code-group input {
+  color: #151b26 !important;
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+  padding: 12px 0 !important;
+}
+
+/* ========================================
+   餐时间工作旅程系统 - 品牌色彩体系
+   ======================================== */
+
+:root {
+  /* 主色调 - 爱马仕橙（鲜艳活力的品牌色） */
+  --primary: 25 100% 50%; /* #FF6C00 爱马仕橙 */
+  --primary-foreground: 0 0% 100%;
+  --primary-glow: 25 100% 65%; /* 更亮的橙色 */
+  
+  /* 辅助色 - 智慧紫（系统科技感） */
+  --secondary: 260 30% 47%; /* #6B5B95 */
+  --secondary-foreground: 0 0% 100%;
+  
+  /* 强调色 - 成长绿（旅程进展色） */
+  --accent: 162 61% 47%; /* #00B894 */
+  --accent-foreground: 0 0% 100%;
+  
+  /* 背景色系 */
+  --background: 0 0% 100%;
+  --foreground: 222 47% 11%;
+  
+  /* 卡片和表面 */
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  
+  /* 弹出层 */
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  
+  /* 静音色 */
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  
+  /* 边框 */
+  --border: 214 32% 91%;
+  --input: 214 32% 91%;
+  
+  /* 圆角 */
+  --radius: 0.5rem;
+  
+  /* 渐变色 */
+  --gradient-primary: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-glow)));
+  --gradient-secondary: linear-gradient(135deg, hsl(var(--secondary)), hsl(260 40% 60%));
+  --gradient-accent: linear-gradient(135deg, hsl(var(--accent)), hsl(162 70% 60%));
+  
+  /* 阴影 */
+  --shadow-elegant: 0 10px 30px -10px hsl(var(--primary) / 0.3);
+  --shadow-glow: 0 0 40px hsl(var(--primary-glow) / 0.4);
+  
+  /* 过渡动画 */
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 暗色模式（可选） */
+.dark {
+  --primary: 25 85% 62%;
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 260 30% 47%;
+  --secondary-foreground: 0 0% 100%;
+  
+  --accent: 162 61% 47%;
+  --accent-foreground: 0 0% 100%;
+  
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
+  
+  --card: 222 47% 11%;
+  --card-foreground: 210 40% 98%;
+  
+  --popover: 222 47% 11%;
+  --popover-foreground: 210 40% 98%;
+  
+  --muted: 217 33% 17%;
+  --muted-foreground: 215 20% 65%;
+  
+  --border: 217 33% 17%;
+  --input: 217 33% 17%;
+}
