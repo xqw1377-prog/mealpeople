@@ -22,7 +22,8 @@
 # 证据要求: HTTP 状态码不构成完整证明。B1-B5/E2/E4/D1-D3 每条攻击后
 #       须执行文末 after-state SQL，确认数据库状态未变（写成功但
 #       后处理 5xx 的情形会被状态码误判为 DENY）。
-# 前置: 00111-00119 已落库、4 个 Edge Function 已部署。
+# 前置: 00111-00122 已落库、5 个 Edge Function 已部署（bind-wechat / wechat-login /
+#       create-tenant-with-admin / tenant-admin-login / wechat-quick-login）。
 # ============================================================
 set -u
 PASS=0; FAIL=0

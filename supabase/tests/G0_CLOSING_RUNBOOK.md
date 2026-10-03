@@ -1,8 +1,9 @@
 # G0 CLOSING RUN 手册（工程整改 CLOSED 后的唯一执行程序）
 
-> 基线 checkpoint：`134d521`（G0-Z-R2 FINAL HARDENING）
-> 状态：SECURITY IMPLEMENTATION = **CLOSED**；LIVE SECURITY PROOF = **OPEN**；NEW SECURITY CODE = **NO**
-> 纪律：只做部署、验证、轮换、取证。验证暴露真实失败时，**只修失败项**，不预防性扩 scope。不再出现第 13 个安全提交。
+> Closing source checkpoint：`17c58f836c90414b37e7f4a16713104bcb43107e`（链：134d521 → 7a30a25 → 61031b9 → 17c58f8）
+> 状态：SECURITY IMPLEMENTATION = **CLOSED**；STATIC PRECLOSURE = **PASS（待 R3 diff 确认）**；LIVE SECURITY PROOF = **OPEN**；NEW SECURITY CODE = **NO**
+> 纪律：只做部署、验证、轮换、取证。验证暴露真实失败时，**只修失败项**，不预防性扩 scope。
+> pgcrypto = LIVE OBSERVATION：部署时实测 `digest()/gen_random_bytes()` 在 `search_path=public` 下可解析；真失败再走 B-line，不预防性改代码。
 
 ## G0 PASS 判定（冻结，六条件缺一即 HOLD）
 
@@ -23,7 +24,7 @@ AND old secrets invalid
 
 1. 逐条应用迁移并记录输出（顺序执行，任一失败即停）：
    ```bash
-   for m in 00111 00112 00113 00114 00115 00116 00117 00118 00119 00120; do
+   for m in 00111 00112 00113 00114 00115 00116 00117 00118 00119 00120 00121 00122; do
      psql "$SUPABASE_DB_URL" -f supabase/migrations/${m}_*.sql 2>&1 | tee ../run-logs/migrate-${m}.log
    done
    ```
@@ -66,7 +67,7 @@ cd supabase/tests && ./g0z_blackbox_matrix.sh | tee ../run-logs/g0z-blackbox-$(d
 
 | # | 证据 | 文件 | 结论 |
 |---|---|---|---|
-| 1 | 迁移 00111-00120 顺序成功 + 部署后状态断言 H1-H7 | migrate-*.log + g0-close-01-*.txt | / |
+| 1 | 迁移 00111-00122 顺序成功 + 部署后状态断言 H1-H7 | migrate-*.log + g0-close-01-*.txt | / |
 | 2 | 六套确定性测试原始输出（含元数据五要素） | g0z/g0ar/g0a/g0c/g0d/g0b-*.log | / |
 | 3 | 黑盒矩阵（DENY×N + ALLOW×2） | g0z-blackbox-*.md | / |
 | 4 | After-state（DB 状态 + 对象字节） | g0-close-02-*.txt + sha256 记录 | / |

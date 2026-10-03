@@ -2,7 +2,7 @@
 -- G0 CLOSING RUN ①: Migration / Deployment Evidence
 --（裁定 2026-10-03：工程整改 CLOSED，本文件只取证，不整改）
 --
--- 用途：00111-00120 落库后在目标库执行，输出部署后的真实状态并断言
+-- 用途：00111-00122 落库后在目标库执行，输出部署后的真实状态并断言
 --       关键不变量。任何断言失败 = 部署状态与设计不符 = 证据不成立。
 -- 运行：psql "$SUPABASE_DB_URL" -f g0_close_01_deployment_evidence.sql \
 --         | tee ../run-logs/g0-close-01-deployment-<date>.txt
