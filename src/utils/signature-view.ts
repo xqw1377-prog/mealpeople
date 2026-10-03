@@ -48,7 +48,7 @@ export function useSignatureViewUrl(url?: string | null): string | null {
       setViewUrl(null)
       return
     }
-    getSignatureViewUrl(url).then(resolved => {
+    getSignatureViewUrl(url).then((resolved) => {
       if (alive && resolved) setViewUrl(resolved)
     })
     return () => {
