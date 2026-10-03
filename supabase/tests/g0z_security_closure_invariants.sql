@@ -427,13 +427,32 @@ DO $$
 DECLARE r jsonb;
 BEGIN
   SELECT public.create_invitation(1, now() + interval '1 day', '33333333-0000-0000-0000-0000000000a1'::uuid) INTO r;
-  IF r ?> 'code' THEN
+  IF r ? 'code' THEN
     INSERT INTO g0z_results VALUES ('R1-4b','PASS','本租户 store 邀请路径保留');
   ELSE
     INSERT INTO g0z_results VALUES ('R1-4b','FAIL','本租户签发被误伤');
   END IF;
 EXCEPTION WHEN OTHERS THEN
   INSERT INTO g0z_results VALUES ('R1-4b','FAIL','本租户签发被误伤: '||SQLERRM);
+END $$;
+SELECT set_config('role','postgres', true);
+
+
+-- ============================================================
+-- G0-CLOSURE-R2: issuer 主体 authority 不变量
+-- ============================================================
+SELECT set_config('role','postgres', true);
+DO $$
+DECLARE v record;
+BEGIN
+  SELECT rolcanlogin, rolbypassrls INTO v FROM pg_roles
+   WHERE rolname = 'membership_issuer_owner';
+  IF v.rolcanlogin = false AND v.rolbypassrls = true THEN
+    INSERT INTO g0z_results VALUES ('R2-1','PASS','issuer 主体 NOLOGIN+BYPASSRLS');
+  ELSE
+    INSERT INTO g0z_results VALUES ('R2-1','FAIL',
+      'rolcanlogin='||coalesce(v.rolcanlogin::text,'null')||' rolbypassrls='||coalesce(v.rolbypassrls::text,'null'));
+  END IF;
 END $$;
 SELECT set_config('role','postgres', true);
 

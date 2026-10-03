@@ -183,7 +183,7 @@ DO $$
 DECLARE r jsonb;
 BEGIN
   SELECT public.create_invitation(1, now() + interval '7 days') INTO r;
-  IF r ?> 'code' AND length(r->>'code') = 32 THEN
+  IF r ? 'code' AND length(r->>'code') = 32 THEN
     INSERT INTO g0ar_results VALUES ('M9','PASS','本租户经 RPC 签发路径保留（hash-only）');
   ELSE
     INSERT INTO g0ar_results VALUES ('M9','FAIL','RPC 签发返回异常: '||COALESCE(r::text,'null'));
