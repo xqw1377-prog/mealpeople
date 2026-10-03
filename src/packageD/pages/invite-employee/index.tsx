@@ -107,10 +107,19 @@ const InviteEmployee: React.FC = () => {
         role: selectedRole as UserRole
       })
 
-      console.log('生成邀请码结果:', result)
-
       if (result) {
-        Taro.showToast({title: '生成成功', icon: 'success'})
+        // G0-Z-R2: 明文仅显示一次（DB 只存 hash，之后不可再查看）
+        Taro.showModal({
+          title: '邀请码已生成（仅显示一次）',
+          content: `${result.code}\n\n请立即复制并发给员工。以普通员工身份加入；管理角色由管理员另行指派。`,
+          confirmText: '复制',
+          cancelText: '关闭',
+          success: (res) => {
+            if (res.confirm) {
+              Taro.setClipboardData({data: result.code})
+            }
+          }
+        })
         loadData()
       } else {
         Taro.showToast({title: '生成失败，请查看控制台日志', icon: 'none', duration: 3000})
@@ -313,14 +322,22 @@ const InviteEmployee: React.FC = () => {
                       {/* 邀请码和状态 */}
                       <View className="flex items-center justify-between mb-2">
                         <View className="flex items-center gap-2">
-                          <Text className="text-xl font-bold text-muted-foreground">{code.code}</Text>
+                          {/* G0-Z-R2: 库中只存 hash，列表仅显示尾 4 位提示 */}
+                          <Text className="text-xl font-bold text-muted-foreground">
+                            {code.token_hint ? `****${code.token_hint}` : (code.code || '（历史码已退休）')}
+                          </Text>
                           <View className={`px-2 py-1 rounded text-xs ${statusBadge.color}`}>
                             <Text className="text-xs">{statusBadge.text}</Text>
                           </View>
                         </View>
                         <Button
                           size="mini"
-                          onClick={() => handleCopy(code.code)}
+                          onClick={() =>
+                            Taro.showToast({
+                              title: '明文仅生成时显示一次，无法复制',
+                              icon: 'none'
+                            })
+                          }
                           className="bg-blue-100 text-white border-0">
                           复制
                         </Button>

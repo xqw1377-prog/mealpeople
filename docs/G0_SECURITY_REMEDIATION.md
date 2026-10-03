@@ -1,10 +1,25 @@
-# G0 SECURITY 整改总文档（G0-F / G0-G / G0-A-R / G0-Z）
+# G0 SECURITY 整改总文档（G0-F / G0-G / G0-A-R / G0-Z / G0-Z-R2）
 
 > 项目：Restaurant Workforce Journey OS（餐饮员工工作旅途操作系统）
 > 分支：`g0-security`　|　治理裁定日期：2026-10-03
-> 纪律：LEGACY FUNCTION FREEZE 生效中——G0 只修安全，不新增业务功能、不建 Journey 表、不做 AI、不做 UI。**G0-Z 是最后一个安全批次；PASS 后立即停止安全扩 scope。**
+> 纪律：LEGACY FUNCTION FREEZE 生效中。**R2 是最后一个安全批次（"之后不再写新整改"）；R2 完成 → 跑黑盒 → server secret 轮换 → G0 = PASS → STOP。**
 >
-> **当前裁定状态（2026-10-03 第三轮裁定）**：G0 = **HOLD**（差关闭阶段）；G0-A-R = IMPLEMENTED / PENDING LIVE VERIFY；G0-Z = **DELIVERED / PENDING LIVE VERIFY**。Secret 轮换与真实 JWT 黑盒矩阵为 G0 PASS 硬门槛。
+> **当前裁定状态（2026-10-03 第四轮/R2 裁定）**：G0 = HOLD；Z1 = REOPEN→已改 allowlist（00120）；Z2 = REOPEN→hash-only 已交付（00120）；Z3 = DESIGN PASS / LIVE VERIFY；Z4 = REOPEN→不可篡改已交付（00120）；Z5 = READY / NOT RUN；Z6 = NOT DONE。JOURNEY V4 CONTRACT = HOLD。
+
+---
+
+## 零-C、G0-Z-R2 FINAL HARDENING（最终四刀，迁移 00120，已交付）
+
+| 刀 | 交付 |
+|---|---|
+| R2-1 profiles allowlist | 撤 table-level `INSERT/UPDATE`（**裁定指出的叠加语义问题属实：列级 REVOKE 无法从 table-level UPDATE 扣列**），白名单授回 name/avatar_url/phone/email/wechat_nickname/wechat_avatar；`role/tenant_id` 及身份列（wechat_openid/unionid）永不授予客户端；profile 创建唯一路径=handle_new_user（DEFINER），客户端自插策略已删。回归已核：`updateUserStatus` 引用不存在的列（本就坏）、`unbindWechat` 无页面调用（死代码）、管理页面改角色已走 RPC |
+| R2-2 invite hash-only | 新列 token_hash/token_hint + UNIQUE 索引；新 RPC `create_invitation`（CSPRNG 128bit、DB 只存 sha256、**明文仅创建时返回一次**、角色固定 employee、限本租户 tenant_admin、有效期≤90 天）；`join_tenant_with_code` 改 hash 查询（明文不再走任何查询路径）；authenticated 直接 INSERT 邀请码全撤（含 32 位码——every valid invite must be server-generated）；管理员对 invitation_codes 仅可 UPDATE(status)（撤销），used_count/token 列不可改；admin_assign_member_role owner 修正为 membership_issuer_owner（00117 遗留的 postgres owner） |
+| R2-3 退休存量短码 | `char_length(code)<16` 全部 `status='revoked'` + 明文脱敏（`RETIRED_` 前缀）；限流保留为纵深防御，不作为低熵安全补偿；明文 code 列不再是凭证（测试 R2-3 验证 active 明文码兑换 DENY） |
+| R2-4 签名不可篡改 | contract_signatures **无 UPDATE 策略 = 覆盖/upsert 一律 DENY**；DELETE 收紧为仅 DRAFT 合同（FINALIZED 签名 immutable，作废走业务事件）；对象路径加 8 位随机段 + upsert:false（唯一对象，不可反复覆盖固定名） |
+
+**前端配套**：生成邀请码改调 `create_invitation` RPC，成功后**一次性弹窗显示明文**（可复制），列表只显示 `****hint`（复制按钮改为提示"仅生成时显示一次"）；签名文件名随机化。**黑盒增强**：新增 B4（role 同值写 DENY）/B5（身份列直写 DENY）/B6（白名单列 ALLOW 回归）/E4（upsert 覆盖 DENY），并把「HTTP 状态码不构成完整证明，须 after-state SQL 核验」写入执行纪律。
+
+**遗留登记（G0 内不修）**：`unbindWechat` 因身份列保护而失效（本就无页面调用；服务端解绑留待 G1）；`tenant-admin-login` 待退休（LEGACY AUTHORITY PATH 已登记）。
 
 ---
 
@@ -56,16 +71,19 @@
 
 按顺序执行，每步完成后在下方勾选：
 
-1. [ ] **Supabase：轮换 anon key**（Dashboard → Settings → API → Reset anon key），随后更新 `src/.env` 的 `TARO_APP_SUPABASE_ANON_KEY` 并重新打包。旧 key 随代码包分发过，必须作废。
-2. [ ] **Supabase：轮换 service_role key**（同页），更新所有 Edge Functions 的 secrets（`supabase secrets set`）。
-3. [ ] **微信：轮换 AppSecret**（mp.weixin.qq.com → 开发管理 → 开发设置 → 重置），更新 Edge Functions 的 `WECHAT_APPSECRET`。仓库内 `.env` 该值为占位符，未泄露。
-4. [ ] **确认 `.env` 不再进入分发物**：打包/上传流程排除 `src/.env`（Miaoda 平台打包配置）；`git check-ignore src/.env` 若未忽略则补 `.gitignore`。
-5. [ ] **数据库直连凭证排查**：确认无任何 `postgres` 角色密码出现在代码/文档/聊天记录中；有则改密。
-6. [ ] **旧值失效验证（Z6 硬性要求，只删 `.env` 不算修复）**：
-   - 旧 anon key：`curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/rest/v1/profiles?select=id&limit=1" -H "apikey: <旧anon key>"` → 期望 **401**
+> **轮换对象界定（R2 裁定修正）**：Supabase anon/publishable key 是设计给客户端的公开凭证，**"曾进 Git"不构成泄密，旧 anon key 是否 401 不是 G0 PASS 硬门槛**。硬轮换对象=server-only secrets：service_role/secret key、WeChat AppSecret、PROVISIONING_TOKEN（Z3 引入，现为高权限 credential：不得出现在前端/日志/query string/Git）。
+
+1. [ ] **Supabase：轮换 service_role / secret key**（Dashboard → Settings → API），更新所有 Edge Functions 的 secrets（`supabase secrets set`）。**此项为 G0 PASS 硬门槛。**
+2. [ ] **微信：轮换 AppSecret**（mp.weixin.qq.com → 开发管理 → 开发设置 → 重置），更新 Edge Functions 的 `WECHAT_APPSECRET`。**硬门槛。**
+3. [ ] **PROVISIONING_TOKEN**：生成新高熵值，`supabase secrets set PROVISIONING_TOKEN=<new>`，同步给平台开通操作人；确认从未进入前端代码/日志/URL。**硬门槛。**
+4. [ ] （可选，随项目整体轮换时一并处理）Supabase anon key 轮换 + 更新 `src/.env` 并重新打包。
+5. [ ] **确认 `.env` 不再进入分发物**：打包/上传流程排除 `src/.env`；`git check-ignore src/.env` 若未忽略则补 `.gitignore`。
+6. [ ] **数据库直连凭证排查**：确认无任何 `postgres` 角色密码出现在代码/文档/聊天记录中；有则改密。
+7. [ ] **旧值失效验证（Z6 硬性要求，只删 `.env` 不算修复）**：
    - 旧 service_role：调用任一 admin 接口 → 期望 **401**
    - 旧微信 AppSecret：`jscode2session` 用旧 secret → 期望 errcode 40125/40013
-   - 三项截图存 `run-logs/rotation-proof.png`
+   - 旧 PROVISIONING_TOKEN：带旧 token 调 create-tenant-with-admin → 期望 **403**
+   - 证据截图存 `run-logs/rotation-proof.png`
 
 ## 三、G0-G：安全不变量测试运行说明
 

@@ -9,6 +9,7 @@ BEGIN;
 CREATE TEMP TABLE g0ar_results (test_id text PRIMARY KEY, status text, detail text);
 
 -- ---------- 夹具 ----------
+--（G0-Z-R2 后邀请码只能经 create_invitation 签发；过期/用尽码由 postgres 调造）
 INSERT INTO public.tenants (id, name, status) VALUES
   ('11111111-1111-1111-1111-111111111111', 'G0AR-TENANT-A', 'active'),
   ('22222222-2222-2222-2222-222222222222', 'G0AR-TENANT-B', 'active');
@@ -19,10 +20,20 @@ INSERT INTO public.profiles (id, phone, role, tenant_id) VALUES
   ('99999999-0000-0000-0000-000000000004', '13800000004', 'tenant_admin', '22222222-2222-2222-2222-222222222222'), -- B管理员
   ('99999999-0000-0000-0000-000000000006', '13800000006', 'employee',     NULL);                                   -- U 无租户
 
-INSERT INTO public.invitation_codes (id, tenant_id, code, role, max_uses, used_count, expires_at, status) VALUES
-  ('66666666-0000-0000-0000-000000000001', '11111111-1111-1111-1111-111111111111', 'G0AR-VALID-CODE', 'employee', 3, 0, now() + interval '7 days', 'active'),
-  ('66666666-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', 'G0AR-EXPIRED-CODE', 'employee', 3, 0, now() - interval '1 day', 'active'),
-  ('66666666-0000-0000-0000-000000000003', '22222222-2222-2222-2222-222222222222', 'G0AR-USEDCODE', 'employee', 1, 1, now() + interval '7 days', 'active');
+-- 以 A 管理员身份签发三条码（R2: hash-only，明文只在变量中）
+SELECT set_config('role','authenticated', true);
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000002","role":"authenticated"}', true);
+CREATE TEMP TABLE g0ar_tokens AS
+SELECT (public.create_invitation(3, now() + interval '7 days'))->>'code' AS valid_code;
+INSERT INTO g0ar_tokens SELECT (public.create_invitation(3, now() + interval '7 days'))->>'code';
+INSERT INTO g0ar_tokens SELECT (public.create_invitation(1, now() + interval '7 days'))->>'code';
+SELECT set_config('role','postgres', true);
+
+-- 第 2/3 条改造成 过期 / 用尽（postgres 全权）
+UPDATE public.invitation_codes SET expires_at = now() - interval '1 day'
+ WHERE token_hash = encode(digest((SELECT valid_code FROM g0ar_tokens OFFSET 1 LIMIT 1), 'sha256'), 'hex');
+UPDATE public.invitation_codes SET used_count = max_uses
+ WHERE token_hash = encode(digest((SELECT valid_code FROM g0ar_tokens OFFSET 2 LIMIT 1), 'sha256'), 'hex');
 
 -- ============================================================
 -- M1: 无租户用户 NULL -> 任意 tenant 自助写入 = DENY（G0-A 旧放行已废除）
@@ -95,7 +106,7 @@ END $$;
 DO $$
 DECLARE r record;
 BEGIN
-  SELECT * INTO r FROM public.join_tenant_with_code('G0AR-EXPIRED-CODE', NULL, 'U');
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0ar_tokens OFFSET 1 LIMIT 1), NULL, 'U');
   IF r.success THEN
     INSERT INTO g0ar_results VALUES ('M5','FAIL','过期邀请码兑换成功');
   ELSE
@@ -106,7 +117,7 @@ END $$;
 DO $$
 DECLARE r record;
 BEGIN
-  SELECT * INTO r FROM public.join_tenant_with_code('G0AR-USEDCODE', NULL, 'U');
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0ar_tokens OFFSET 2 LIMIT 1), NULL, 'U');
   IF r.success THEN
     INSERT INTO g0ar_results VALUES ('M6','FAIL','已用尽邀请码兑换成功');
   ELSE
@@ -118,7 +129,7 @@ END $$;
 DO $$
 DECLARE r record;
 BEGIN
-  SELECT * INTO r FROM public.join_tenant_with_code('G0AR-VALID-CODE', '99999999-0000-0000-0000-000000000003', '冒名');
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0ar_tokens LIMIT 1), '99999999-0000-0000-0000-000000000003', '冒名');
   IF r.success THEN
     INSERT INTO g0ar_results VALUES ('M7a','FAIL','替他人兑换成功');
   ELSE
@@ -129,12 +140,12 @@ END $$;
 DO $$
 DECLARE r record; v_tenant uuid; v_used int; v_uses int;
 BEGIN
-  SELECT * INTO r FROM public.join_tenant_with_code('G0AR-VALID-CODE', NULL, 'U');
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0ar_tokens LIMIT 1), NULL, 'U');
 
   SELECT tenant_id INTO v_tenant FROM public.profiles
    WHERE id = '99999999-0000-0000-0000-000000000006';
   SELECT used_count INTO v_used FROM public.invitation_codes
-   WHERE code = 'G0AR-VALID-CODE';
+   WHERE token_hash = encode(digest((SELECT valid_code FROM g0ar_tokens LIMIT 1), 'sha256'), 'hex');
   SELECT count(*) INTO v_uses FROM public.invitation_code_uses
    WHERE user_id = '99999999-0000-0000-0000-000000000006';
 
@@ -157,7 +168,7 @@ DO $$
 BEGIN
   BEGIN
     INSERT INTO public.invitation_codes (tenant_id, code, role, max_uses, expires_at)
-    VALUES ('22222222-2222-2222-2222-222222222222', 'G0AR-CROSS-CODE', 'employee', 1, now() + interval '7 days');
+    VALUES ('22222222-2222-2222-2222-222222222222', 'G0AR-CROSS-CODE-LONG-ENOUGH-16', 'employee', 1, now() + interval '7 days');
   EXCEPTION WHEN insufficient_privilege THEN
     INSERT INTO g0ar_results VALUES ('M8','PASS','跨租户签发邀请码被 DENY');
     RETURN;
@@ -169,10 +180,14 @@ END $$;
 -- M9 回归：Admin A 为本租户签发邀请码 = ALLOW（正常运营路径）
 -- ============================================================
 DO $$
+DECLARE r jsonb;
 BEGIN
-  INSERT INTO public.invitation_codes (tenant_id, code, role, max_uses, expires_at)
-  VALUES ('11111111-1111-1111-1111-111111111111', 'G0AR-OK-CODE', 'employee', 1, now() + interval '7 days');
-  INSERT INTO g0ar_results VALUES ('M9','PASS','本租户签发邀请码路径保留');
+  SELECT public.create_invitation(1, now() + interval '7 days') INTO r;
+  IF r ?> 'code' AND length(r->>'code') = 32 THEN
+    INSERT INTO g0ar_results VALUES ('M9','PASS','本租户经 RPC 签发路径保留（hash-only）');
+  ELSE
+    INSERT INTO g0ar_results VALUES ('M9','FAIL','RPC 签发返回异常: '||COALESCE(r::text,'null'));
+  END IF;
 EXCEPTION WHEN OTHERS THEN
   INSERT INTO g0ar_results VALUES ('M9','FAIL','本租户签发被误伤: '||SQLERRM);
 END $$;
@@ -184,7 +199,7 @@ SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-0000000
 DO $$
 DECLARE r record;
 BEGIN
-  SELECT * INTO r FROM public.join_tenant_with_code('G0AR-OK-CODE', NULL, 'empA');
+  SELECT * INTO r FROM public.join_tenant_with_code('G0AR-ANY-CODE-TRY-JUMP-00000000', NULL, 'empA');
   IF r.success THEN
     INSERT INTO g0ar_results VALUES ('M10','FAIL','已有租户者成功跳槽到另一企业');
   ELSE

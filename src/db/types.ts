@@ -77,7 +77,12 @@ export interface InvitationCode {
   id: string
   tenant_id: string
   store_id: string | null
-  code: string
+  /** G0-Z-R2: 仅历史数据存在（已退休脱敏）；新邀请码不落明文 */
+  code: string | null
+  /** 新邀请码：sha256(token)，不对外展示 */
+  token_hash?: string | null
+  /** 新邀请码：明文尾 4 位提示（列表展示用） */
+  token_hint?: string | null
   role: UserRole
   max_uses: number
   used_count: number

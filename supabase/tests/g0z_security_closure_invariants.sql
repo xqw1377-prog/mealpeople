@@ -20,15 +20,22 @@ INSERT INTO public.profiles (id, phone, role, tenant_id) VALUES
   ('99999999-0000-0000-0000-000000000004', '13800000004', 'tenant_admin', '22222222-2222-2222-2222-222222222222'),
   ('99999999-0000-0000-0000-000000000006', '13800000006', 'employee',     NULL);
 
-INSERT INTO public.invitation_codes (id, tenant_id, code, role, max_uses, used_count, expires_at, status) VALUES
-  ('66666666-0000-0000-0000-000000000011', '11111111-1111-1111-1111-111111111111',
-   'G0ZVALIDCODE0000000000000000000011', 'employee', 3, 0, now() + interval '7 days', 'active'),
-  ('66666666-0000-0000-0000-000000000012', '11111111-1111-1111-1111-111111111111',
-   'G0ZEXPIREDCODE000000000000000000012', 'employee', 3, 0, now() - interval '1 day', 'active'),
-  ('66666666-0000-0000-0000-000000000013', '11111111-1111-1111-1111-111111111111',
-   'G0ZMGRROLECODE000000000000000000013', 'store_manager', 3, 0, now() + interval '7 days', 'active'),
-  ('66666666-0000-0000-0000-000000000014', '11111111-1111-1111-1111-111111111111',
-   'G0ZUSEDCODE000000000000000000000014', 'employee', 1, 1, now() + interval '7 days', 'active');
+-- R2: 邀请码只能经 create_invitation 签发（hash-only）；调造由 postgres 完成
+SELECT set_config('role','authenticated', true);
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000002","role":"authenticated"}', true);
+CREATE TEMP TABLE g0z_tokens AS
+SELECT (public.create_invitation(3, now() + interval '7 days'))->>'code' AS valid_code;
+INSERT INTO g0z_tokens SELECT (public.create_invitation(3, now() + interval '7 days'))->>'code'; -- -> 过期
+INSERT INTO g0z_tokens SELECT (public.create_invitation(3, now() + interval '7 days'))->>'code'; -- -> store_manager
+INSERT INTO g0z_tokens SELECT (public.create_invitation(1, now() + interval '7 days'))->>'code'; -- -> 用尽
+SELECT set_config('role','postgres', true);
+
+UPDATE public.invitation_codes SET expires_at = now() - interval '1 day'
+ WHERE token_hash = encode(digest((SELECT valid_code FROM g0z_tokens OFFSET 1 LIMIT 1), 'sha256'), 'hex');
+UPDATE public.invitation_codes SET role = 'store_manager'
+ WHERE token_hash = encode(digest((SELECT valid_code FROM g0z_tokens OFFSET 2 LIMIT 1), 'sha256'), 'hex');
+UPDATE public.invitation_codes SET used_count = max_uses
+ WHERE token_hash = encode(digest((SELECT valid_code FROM g0z_tokens OFFSET 3 LIMIT 1), 'sha256'), 'hex');
 
 -- ============================================================
 -- Z1-1/Z1-2: authenticated 直写 protected columns（含同值写）= DENY
@@ -134,9 +141,9 @@ DO $$
 DECLARE m1 text; m2 text; m3 text; m4 text; r record;
 BEGIN
   SELECT * INTO r FROM public.join_tenant_with_code('G0Z-NOT-EXIST-0000000000000', NULL, 'U'); m1 := r.message;
-  SELECT * INTO r FROM public.join_tenant_with_code('G0ZEXPIREDCODE000000000000000000012', NULL, 'U'); m2 := r.message;
-  SELECT * INTO r FROM public.join_tenant_with_code('G0ZUSEDCODE000000000000000000000014', NULL, 'U'); m3 := r.message;
-  SELECT * INTO r FROM public.join_tenant_with_code('G0ZMGRROLECODE000000000000000000013', NULL, 'U'); m4 := r.message;
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0z_tokens OFFSET 1 LIMIT 1), NULL, 'U'); m2 := r.message;
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0z_tokens OFFSET 3 LIMIT 1), NULL, 'U'); m3 := r.message;
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0z_tokens OFFSET 2 LIMIT 1), NULL, 'U'); m4 := r.message;
 
   IF m1 IS NOT DISTINCT FROM m2 AND m2 IS NOT DISTINCT FROM m3 AND m3 IS NOT DISTINCT FROM m4
      AND m1 = '邀请码无效或不可用' THEN
@@ -157,7 +164,7 @@ BEGIN
   FOR i IN 1..6 LOOP
     SELECT * INTO r FROM public.join_tenant_with_code('G0Z-NOT-EXIST-0000000000000', NULL, 'U');
   END LOOP;
-  SELECT * INTO r FROM public.join_tenant_with_code('G0ZVALIDCODE0000000000000000000011', NULL, 'U');
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0z_tokens LIMIT 1), NULL, 'U');
   IF NOT r.success AND r.message LIKE '%频繁%' THEN
     blocked := true;
   END IF;
@@ -187,7 +194,7 @@ DO $$
 BEGIN
   BEGIN
     UPDATE public.invitation_codes SET used_count = 0
-     WHERE code = 'G0ZVALIDCODE0000000000000000000011';
+     WHERE token_hash = encode(digest((SELECT valid_code FROM g0z_tokens LIMIT 1), 'sha256'), 'hex');
   EXCEPTION WHEN insufficient_privilege THEN
     INSERT INTO g0z_results VALUES ('Z2-5','PASS','used_count 手改被 DENY');
     RETURN;
@@ -202,9 +209,9 @@ DO $$
 BEGIN
   BEGIN
     INSERT INTO public.invitation_codes (tenant_id, code, role, max_uses, expires_at)
-    VALUES ('11111111-1111-1111-1111-111111111111', 'SHORT6', 'employee', 1, now() + interval '7 days');
+    VALUES ('11111111-1111-1111-1111-111111111111', 'EVEN32CHARSERVERLOOKINGCODE1234', NULL, 'employee', 1, now() + interval '7 days');
   EXCEPTION WHEN insufficient_privilege THEN
-    INSERT INTO g0z_results VALUES ('Z2-6','PASS','短码签发被 DENY');
+    INSERT INTO g0z_results VALUES ('Z2-6','PASS','authenticated 直插邀请码被 DENY（仅服务端签发）');
     RETURN;
   END;
   INSERT INTO g0z_results VALUES ('Z2-6','FAIL','仍可签发可猜短码');
@@ -236,11 +243,100 @@ SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-0000000
 DO $$
 DECLARE r record;
 BEGIN
-  SELECT * INTO r FROM public.join_tenant_with_code('G0ZVALIDCODE0000000000000000000011', NULL, 'U');
+  SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0z_tokens LIMIT 1), NULL, 'U');
   IF r.success AND r.role = 'employee' THEN
     INSERT INTO g0z_results VALUES ('Z2-7','PASS','合法邀请兑换成功（employee）');
   ELSE
     INSERT INTO g0z_results VALUES ('Z2-7','FAIL','合法兑换失败: '||COALESCE(r.message,'?'));
+  END IF;
+END $$;
+SELECT set_config('role','postgres', true);
+
+-- ============================================================
+-- R2-1a 回归: 白名单列 name 可自助更新（ALLOW）
+-- ============================================================
+SELECT set_config('role','authenticated', true);
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000003","role":"authenticated"}', true);
+DO $$
+BEGIN
+  UPDATE public.profiles SET name = 'G0Z白名单回归'
+   WHERE id = '99999999-0000-0000-0000-000000000003';
+  IF NOT FOUND THEN
+    INSERT INTO g0z_results VALUES ('R2-1a','FAIL','白名单列更新 0 行');
+  ELSE
+    INSERT INTO g0z_results VALUES ('R2-1a','PASS','白名单列(name)自助更新保留');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  INSERT INTO g0z_results VALUES ('R2-1a','FAIL','白名单列被误伤: '||SQLERRM);
+END $$;
+
+-- ============================================================
+-- R2-1b: 白名单外身份列 wechat_openid 直写（解绑路径）= DENY
+-- ============================================================
+DO $$
+BEGIN
+  BEGIN
+    UPDATE public.profiles SET wechat_openid = NULL
+     WHERE id = '99999999-0000-0000-0000-000000000003';
+  EXCEPTION WHEN insufficient_privilege THEN
+    INSERT INTO g0z_results VALUES ('R2-1b','PASS','身份列直写被 DENY');
+    RETURN;
+  END;
+  INSERT INTO g0z_results VALUES ('R2-1b','FAIL','wechat_openid 仍可客户端直写');
+END $$;
+
+-- ============================================================
+-- R2-2a: create_invitation 一次性明文，DB 只存 hash/hint
+-- ============================================================
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000002","role":"authenticated"}', true);
+DO $$
+DECLARE r jsonb; v_row record; v_token text;
+BEGIN
+  SELECT public.create_invitation(1, now() + interval '1 day') INTO r;
+  v_token := r->>'code';
+  SELECT code, token_hash, token_hint INTO v_row FROM public.invitation_codes
+   WHERE token_hash = encode(digest(v_token, 'sha256'), 'hex');
+  IF length(v_token) = 32 AND v_row.code IS NULL
+     AND v_row.token_hint = right(v_token, 4) THEN
+    INSERT INTO g0z_results VALUES ('R2-2a','PASS','hash-only 落库 + 一次性明文');
+  ELSE
+    INSERT INTO g0z_results VALUES ('R2-2a','FAIL','落库形态不符');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  INSERT INTO g0z_results VALUES ('R2-2a','FAIL','签发异常: '||SQLERRM);
+END $$;
+
+-- ============================================================
+-- R2-2b: employee 调 create_invitation = DENY
+-- ============================================================
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000003","role":"authenticated"}', true);
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.create_invitation(1, now() + interval '1 day');
+  EXCEPTION WHEN OTHERS THEN
+    INSERT INTO g0z_results VALUES ('R2-2b','PASS','非管理员签发被 DENY');
+    RETURN;
+  END;
+  INSERT INTO g0z_results VALUES ('R2-2b','FAIL','employee 成功签发邀请码');
+END $$;
+
+-- ============================================================
+-- R2-3: 明文 code 列不再是凭证（postgres 造 active 明文码 -> 兑换 DENY）
+-- ============================================================
+SELECT set_config('role','postgres', true);
+INSERT INTO public.invitation_codes (tenant_id, code, role, max_uses, expires_at, status)
+VALUES ('11111111-1111-1111-1111-111111111111', 'LEGACYPLAIN8', 'employee', 1, now() + interval '7 days', 'active');
+SELECT set_config('role','authenticated', true);
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000006","role":"authenticated"}', true);
+DO $$
+DECLARE r record;
+BEGIN
+  SELECT * INTO r FROM public.join_tenant_with_code('LEGACYPLAIN8', NULL, 'U');
+  IF r.success THEN
+    INSERT INTO g0z_results VALUES ('R2-3','FAIL','明文 code 列仍可兑换');
+  ELSE
+    INSERT INTO g0z_results VALUES ('R2-3','PASS','明文 code 列不再是凭证');
   END IF;
 END $$;
 SELECT set_config('role','postgres', true);

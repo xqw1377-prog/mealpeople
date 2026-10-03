@@ -19,6 +19,9 @@
 #
 # 纪律: 本脚本从真实网络入口（PostgREST/RPC/Storage/Edge）发起，
 #       是 G0 PASS 的最终证据；SQL 模拟测试只是前置。
+# 证据要求: HTTP 状态码不构成完整证明。B1-B5/E2/E4/D1-D3 每条攻击后
+#       须执行文末 after-state SQL，确认数据库状态未变（写成功但
+#       后处理 5xx 的情形会被状态码误判为 DENY）。
 # 前置: 00111-00119 已落库、4 个 Edge Function 已部署。
 # ============================================================
 set -u
@@ -70,6 +73,11 @@ c=$(req anon GET "/rest/v1/candidates?select=id");                              
 c=$(req "$JWT_EMP_A" PATCH "/rest/v1/profiles?id=eq.$EMP_A_ID" '{"role":"super_admin"}');           check B1 "员工A 自改 role=super_admin" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
 c=$(req "$JWT_EMP_A" PATCH "/rest/v1/profiles?id=eq.$EMP_A_ID" "{\"tenant_id\":\"$TENANT_B\"}");    check B2 "员工A 自改 tenant_id→B" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
 c=$(req "$JWT_ADMIN_A" PATCH "/rest/v1/profiles?id=eq.$EMP_B_ID" '{"role":"store_manager"}');      check B3 "管理员A 直改B成员role(绕RPC)" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+# G0-R2: 同值写也必须 DENY（allowlist 模型的直接验证）
+c=$(req "$JWT_EMP_A" PATCH "/rest/v1/profiles?id=eq.$EMP_A_ID" '{"role":"employee"}');              check B4 "员工A role=employee 同值写" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+c=$(req "$JWT_EMP_A" PATCH "/rest/v1/profiles?id=eq.$EMP_A_ID" '{"wechat_openid":null}');           check B5 "员工A 直写身份列 wechat_openid" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+# 白名单列回归（必须 ALLOW）
+c=$(req "$JWT_EMP_A" PATCH "/rest/v1/profiles?id=eq.$EMP_A_ID" '{"name":"blackbox-ok"}');           check B6 "员工A 改 name(白名单列)" 2xx "$c"
 
 # ---------- 租户创建（CONTROLLED_PROVISIONING） ----------
 c=$(req "$JWT_EMP_A" POST "/rest/v1/tenants" '{"name":"blackbox-攻击租户","status":"active"}');     check C1 "员工A 自建租户" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
@@ -93,6 +101,10 @@ check E2 "员工A 向租户B合同路径上传签名" DENY "$c"
 c=$(curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/storage/v1/object/authenticated/contract_signatures/$TENANT_B/$CONTRACT_B_ID/sig.png" \
   -H "apikey: $ANON_KEY" -H "Authorization: Bearer $JWT_EMP_A")
 check E3 "员工A 读租户B合同签名对象" DENY "$c"
+# G0-R2: 覆盖/upsert 已签名对象 = DENY（签名不可篡改）
+c=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/storage/v1/object/contract_signatures/$TENANT_B/$CONTRACT_B_ID/sig.png" \
+  -H "apikey: $ANON_KEY" -H "Authorization: Bearer $JWT_EMP_A" -H "Content-Type: image/png" -H "x-upsert: true" --data-binary 'x')
+check E4 "upsert 覆盖已存在签名" DENY "$c"
 
 # ---------- Edge Functions ----------
 c=$(curl -s -o /tmp/g0z_body -w '%{http_code}' -X POST "$SUPABASE_URL/functions/v1/create-tenant-with-admin" \

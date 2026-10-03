@@ -28,9 +28,10 @@ export async function uploadSignature(
   signatureType: 'employee' | 'company'
 ): Promise<string | null> {
   try {
-    // 生成唯一的文件名
+    // 生成唯一的文件名（G0-R2: 唯一对象路径 + upsert:false = 签名不可覆盖）
     const timestamp = Date.now()
-    const fileName = `${tenantId}/${contractId}/${timestamp}_${signatureType}.png`
+    const random = Math.random().toString(36).slice(2, 10)
+    const fileName = `${tenantId}/${contractId}/${timestamp}_${random}_${signatureType}.png`
 
     // 读取临时文件
     const fileSystemManager = Taro.getFileSystemManager()

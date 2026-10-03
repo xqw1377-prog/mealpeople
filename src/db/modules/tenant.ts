@@ -489,33 +489,26 @@ export async function generateInvitationCode(
     role?: UserRole
   }
 ) {
-  // G0-Z2 INV-1: 码由服务端生成（128bit 熵），客户端不再自造短码
-  const {data: generated, error: genError} = await supabase.rpc('generate_invitation_code')
-  if (genError || !generated) {
-    console.error('生成邀请码失败:', genError)
-    return null
-  }
-  const code = String(generated)
-
-  const {data, error} = await supabase
-    .from('invitation_codes')
-    .insert({
-      tenant_id: tenantId,
-      code: code,
-      created_by: createdBy,
-      max_uses: options?.maxUses || 1,
-      expires_at: options?.expiresAt,
-      role: options?.role || 'employee',
-      status: 'active'
-    })
-    .select()
-    .maybeSingle()
+  // G0-Z-R2: 邀请码由服务端 RPC 签发——CSPRNG token、DB 只存 hash、
+  // 明文仅本次返回；角色固定 employee（管理角色须管理员指派）
+  const {data, error} = await supabase.rpc('create_invitation', {
+    p_max_uses: options?.maxUses ?? 1,
+    p_expires_at: options?.expiresAt ?? new Date(Date.now() + 7 * 86400000).toISOString(),
+    p_store_id: null
+  })
 
   if (error) {
     console.error('生成邀请码失败:', error)
     return null
   }
-  return data
+
+  return data as {
+    code: string
+    hint: string
+    role: string
+    max_uses: number
+    expires_at: string
+  }
 }
 
 /**
