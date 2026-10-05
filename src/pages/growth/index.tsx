@@ -1,7 +1,9 @@
 /**
- * 我的成长页面 - 员工培训发展体系
+ * 我的成长 Tab · 工作旅途 DS V2（2026-10-06 一期）
+ * 结构：page shell + sections（等级/学习/认证/课程/学习中心）
+ * 状态：Loading(骨架) / Empty(员工未建档引导) / Error(重试) / Normal
+ * 修复：原空态 switchTab 指向非 Tab 页（/packageB/pages/home）为坏路由，改为工作台 Tab
  */
-
 import {ScrollView, Text, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
@@ -10,356 +12,281 @@ import {getEmployeeByUserId} from '@/db/api'
 import {getEmployeeGrowthData} from '@/db/api-growth'
 import type {GrowthData} from '@/db/types-growth'
 
+const formatDate = (s: string) => {
+  const d = new Date(s)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const COURSE_STATUS: Record<string, {text: string; cls: string}> = {
+  enrolled: {text: '已报名', cls: 'bg-info-50 text-info-600'},
+  in_progress: {text: '学习中', cls: 'bg-warning-50 text-warning-600'},
+  completed: {text: '已完成', cls: 'bg-success-50 text-success-600'},
+  failed: {text: '未通过', cls: 'bg-danger-50 text-danger-600'}
+}
+
+function Section(props: {title: string; icon: string; children: React.ReactNode}) {
+  return (
+    <View className="mx-4 mt-4 bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+      <View className="flex items-center justify-between mb-3.5">
+        <Text className="text-base font-semibold text-gray-900">{props.title}</Text>
+        <Text className={`${props.icon} text-lg text-primary-500`} />
+      </View>
+      {props.children}
+    </View>
+  )
+}
+
 export default function MyGrowth() {
   const {user} = useAuth({guard: true})
-  const [growthData, setGrowthData] = useState<GrowthData | null>(null)
+  const [data, setData] = useState<GrowthData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // 加载成长数据
-  const loadGrowthData = useCallback(async () => {
-    if (!user?.id) {
-      console.log('⚠️ [我的成长] 用户未登录')
-      return
-    }
-
+  const load = useCallback(async () => {
+    if (!user?.id) return
     setLoading(true)
+    setError(null)
     try {
-      console.log('🔍 [我的成长] 开始加载成长数据，用户ID:', user.id)
-
-      // 获取员工信息
-      const employee = await getEmployeeByUserId(user.id)
-      console.log('👤 [我的成长] 员工信息:', employee)
-
-      if (!employee) {
-        console.error('❌ [我的成长] 未找到员工信息')
-        Taro.showToast({
-          title: '您还不是员工，请联系管理员添加',
-          icon: 'none',
-          duration: 3000
-        })
+      const emp = await getEmployeeByUserId(user.id)
+      if (!emp) {
+        setData(null)
         setLoading(false)
         return
       }
-
-      // 获取成长数据
-      console.log('📊 [我的成长] 开始获取成长数据，员工ID:', employee.id)
-      const data = await getEmployeeGrowthData(employee.id)
-      console.log('✅ [我的成长] 成长数据:', data)
-
-      setGrowthData(data)
-    } catch (error) {
-      console.error('❌ [我的成长] 加载成长数据失败:', error)
-      Taro.showToast({
-        title: `加载失败: ${error instanceof Error ? error.message : '未知错误'}`,
-        icon: 'none',
-        duration: 3000
-      })
+      setData(await getEmployeeGrowthData(emp.id))
+    } catch (e: any) {
+      console.error('加载成长数据失败:', e)
+      setError(e?.message || '加载失败')
     } finally {
       setLoading(false)
     }
   }, [user])
 
   useDidShow(() => {
-    loadGrowthData()
+    load()
   })
 
-  // 获取课程状态信息
-  const getCourseStatusInfo = (status: string) => {
-    const statusMap: Record<string, {text: string; color: string; bgColor: string}> = {
-      enrolled: {text: '已报名', color: 'text-muted-foreground', bgColor: 'bg-blue-100'},
-      in_progress: {text: '学习中', color: 'text-muted-foreground', bgColor: 'bg-blue-100'},
-      completed: {text: '已完成', color: 'text-muted-foreground', bgColor: 'bg-blue-100'},
-      failed: {text: '未通过', color: 'text-red-600', bgColor: 'bg-blue-100'}
-    }
-    return statusMap[status] || {text: '未知', color: 'text-muted-foreground', bgColor: 'bg-gray-50'}
-  }
-
-  // 格式化日期
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-  }
-
+  // ---- Loading：骨架 ----
   if (loading) {
     return (
-      <View className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <View className="text-center">
-          <View className="i-mdi-loading text-5xl text-primary animate-spin mb-4" />
-          <Text className="text-muted-foreground">加载中...</Text>
+      <View className="min-h-screen bg-gray-50">
+        <View className="bg-primary-500 pt-10 pb-14 px-4">
+          <Text className="text-xl font-bold text-white">我的成长</Text>
+        </View>
+        <View className="px-4 -mt-9">
+          <View className="bg-white rounded-2xl p-5 h-28 animate-pulse" />
+          <View className="mt-4 bg-white rounded-2xl p-5 h-36 animate-pulse" />
+          <View className="mt-4 bg-white rounded-2xl p-5 h-24 animate-pulse" />
         </View>
       </View>
     )
   }
 
-  if (!growthData) {
+  // ---- Error：重试 ----
+  if (error) {
     return (
-      <View className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <View className="text-center">
-          <View className="i-mdi-account-alert text-6xl text-muted-foreground/30 mb-4" />
-          <Text className="text-lg font-semibold text-foreground mb-2 block">暂无成长数据</Text>
-          <Text className="text-sm text-muted-foreground mb-6 block">您还不是员工或数据加载失败</Text>
-          <View
-            className="bg-primary text-white px-6 py-3 rounded-lg active:opacity-70"
-            onClick={() => {
-              Taro.switchTab({url: '/packageB/pages/home/index'})
-            }}>
-            <Text className="text-white text-sm font-medium">返回首页</Text>
-          </View>
+      <View className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-8">
+        <Text className="i-mdi-cloud-alert-outline text-5xl text-gray-300" />
+        <Text className="mt-4 text-sm text-gray-500">{error}</Text>
+        <View
+          className="mt-6 px-8 py-2.5 rounded-full bg-primary-500 text-white text-sm"
+          hoverClass="opacity-80"
+          onClick={load}>
+          重新加载
         </View>
       </View>
     )
   }
 
-  const {level, learning_progress, certifications, recent_courses} = growthData
+  // ---- Empty：未建档引导（修复原坏路由 switchTab） ----
+  if (!data) {
+    return (
+      <View className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-8">
+        <View className="w-20 h-20 rounded-full bg-primary-50 flex items-center justify-center">
+          <Text className="i-mdi-account-child-outline text-5xl text-primary-500" />
+        </View>
+        <Text className="mt-5 text-lg font-bold text-gray-900">还没有成长档案</Text>
+        <Text className="mt-2 text-sm text-gray-400 text-center">您还不是员工，请联系管理员添加后开始成长之旅</Text>
+        <View
+          className="mt-8 px-10 py-3 rounded-full bg-primary-500 text-white text-sm font-medium"
+          hoverClass="opacity-80"
+          onClick={() => Taro.switchTab({url: '/pages/index/index'})}>
+          回工作台
+        </View>
+      </View>
+    )
+  }
+
+  const {level, learning_progress, certifications, recent_courses} = data
+  const levelPct = Math.min((level.level_score / level.next_level_score) * 100, 100)
 
   return (
     <View className="min-h-screen bg-gray-50">
-      <ScrollView scrollY className="box-border" style={{height: '100vh', background: 'transparent'}}>
-        <View className="p-4">
-          {/* 页面标题 */}
-          <View className="mb-6">
-            <Text className="text-2xl font-bold text-foreground">我的成长</Text>
-            <Text className="text-sm text-muted-foreground mt-1 block">培训发展与职业成长</Text>
+      <ScrollView scrollY className="h-screen box-border">
+        {/* 等级 Hero */}
+        <View className="relative overflow-hidden bg-primary-500 px-4 pt-10 pb-16">
+          <View className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-white/10" />
+          <View className="relative flex items-center justify-between">
+            <View>
+              <Text className="text-xs text-white/75">当前等级</Text>
+              <Text className="mt-1 text-2xl font-bold text-white">{level.current_level}</Text>
+            </View>
+            <View className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center">
+              <Text className="i-mdi-star-four-points-outline text-3xl text-white" />
+            </View>
           </View>
-
-          {/* 当前等级卡片 */}
-          <View className="bg-blue-100 rounded-lg p-6 mb-4">
-            <View className="flex flex-row items-center justify-between mb-4">
-              <View>
-                <Text className="text-blue-600/80 text-sm">当前等级</Text>
-                <Text className="text-foreground text-2xl font-bold mt-1">{level.current_level}</Text>
-              </View>
-              <View className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
-                <View className="i-mdi-star text-4xl text-blue-600" />
-              </View>
+          <View className="relative mt-4">
+            <View className="flex items-center justify-between mb-1.5">
+              <Text className="text-2xs text-white/75">等级积分</Text>
+              <Text className="text-2xs text-white">
+                {level.level_score} / {level.next_level_score}
+              </Text>
             </View>
-
-            {/* 等级进度 */}
-            <View className="mb-2">
-              <View className="flex flex-row items-center justify-between mb-2">
-                <Text className="text-blue-600/80 text-xs">等级积分</Text>
-                <Text className="text-blue-600 text-xs">
-                  {level.level_score} / {level.next_level_score}
-                </Text>
-              </View>
-              <View className="h-2 bg-white rounded-full overflow-hidden">
-                <View
-                  className="h-full bg-white rounded-full"
-                  style={{
-                    width: `${Math.min((level.level_score / level.next_level_score) * 100, 100)}%`
-                  }}
-                />
-              </View>
+            <View className="h-1.5 bg-white/25 rounded-full overflow-hidden">
+              <View className="h-full bg-white rounded-full" style={{width: `${levelPct}%`}} />
             </View>
-
-            <Text className="text-blue-600/80 text-xs mt-2">
-              距离 {level.next_level} 还需 {level.next_level_score - level.level_score} 积分
+            <Text className="mt-1.5 text-2xs text-white/70">
+              距 {level.next_level} 还需 {level.next_level_score - level.level_score} 积分
             </Text>
           </View>
+        </View>
 
-          {/* 学习进度统计 */}
-          <View className="bg-white rounded-lg p-6 border-2 border-gray-200 mb-4 shadow-sm">
-            <View className="flex flex-row items-center justify-between mb-4">
-              <Text className="text-lg font-semibold text-foreground">学习进度</Text>
-              <View className="i-mdi-chart-line text-2xl text-blue-600" />
-            </View>
-
-            <View className="grid grid-cols-3 gap-3 mb-4">
+        {/* 学习进度统计条 */}
+        <View className="px-4 -mt-9 relative z-10">
+          <View className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.06)] py-4 px-2">
+            <View className="grid grid-cols-3">
               <View className="text-center">
-                <Text className="text-2xl font-bold text-blue-600">{learning_progress.total_courses}</Text>
-                <Text className="text-xs text-muted-foreground mt-1">总课程</Text>
+                <Text className="text-xl font-bold text-gray-900">{learning_progress.total_courses}</Text>
+                <Text className="block mt-0.5 text-2xs text-gray-400">总课程</Text>
+              </View>
+              <View className="text-center border-l border-r border-gray-100">
+                <Text className="text-xl font-bold text-success-600">{learning_progress.completed_courses}</Text>
+                <Text className="block mt-0.5 text-2xs text-gray-400">已完成</Text>
               </View>
               <View className="text-center">
-                <Text className="text-2xl font-bold text-muted-foreground">{learning_progress.completed_courses}</Text>
-                <Text className="text-xs text-muted-foreground mt-1">已完成</Text>
-              </View>
-              <View className="text-center">
-                <Text className="text-2xl font-bold text-muted-foreground">
-                  {learning_progress.in_progress_courses}
-                </Text>
-                <Text className="text-xs text-muted-foreground mt-1">学习中</Text>
+                <Text className="text-xl font-bold text-info-600">{learning_progress.in_progress_courses}</Text>
+                <Text className="block mt-0.5 text-2xs text-gray-400">学习中</Text>
               </View>
             </View>
-
-            {/* 完成率进度条 */}
-            <View className="mb-3">
-              <View className="flex flex-row items-center justify-between mb-2">
-                <Text className="text-sm text-muted-foreground">完成率</Text>
-                <Text className="text-sm font-medium text-blue-600">{learning_progress.completion_rate}%</Text>
+            <View className="mt-3 px-4">
+              <View className="flex items-center justify-between mb-1.5">
+                <Text className="text-2xs text-gray-400">完成率</Text>
+                <Text className="text-2xs font-medium text-primary-600">{learning_progress.completion_rate}%</Text>
               </View>
-              <View className="h-2 bg-gray-50 rounded-full overflow-hidden">
+              <View className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <View
-                  className="h-full bg-blue-100 rounded-full"
+                  className="h-full bg-primary-500 rounded-full"
                   style={{width: `${learning_progress.completion_rate}%`}}
                 />
               </View>
-            </View>
-
-            {/* 学习统计 */}
-            <View className="grid grid-cols-2 gap-3 pt-3 border-t border-border">
-              <View>
-                <Text className="text-xs text-muted-foreground">学习时长</Text>
-                <Text className="text-lg font-semibold text-foreground mt-1">
-                  {learning_progress.total_learning_hours}h
+              <View className="mt-2.5 flex items-center gap-4">
+                <Text className="text-2xs text-gray-400">
+                  学习时长{' '}
+                  <Text className="font-semibold text-gray-700">{learning_progress.total_learning_hours}h</Text>
                 </Text>
-              </View>
-              <View>
-                <Text className="text-xs text-muted-foreground">平均分数</Text>
-                <Text className="text-lg font-semibold text-foreground mt-1">{learning_progress.average_score}分</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* 获得认证 */}
-          <View className="bg-white rounded-lg p-6 border-2 border-gray-200 mb-4 shadow-sm">
-            <View className="flex flex-row items-center justify-between mb-4">
-              <Text className="text-lg font-semibold text-foreground">获得认证</Text>
-              <View className="i-mdi-certificate text-2xl text-blue-600" />
-            </View>
-
-            {certifications.length === 0 ? (
-              <View className="text-center py-8">
-                <View className="i-mdi-certificate-outline text-5xl text-muted-foreground/30 mb-2" />
-                <Text className="text-sm text-muted-foreground">暂无认证</Text>
-              </View>
-            ) : (
-              <View className="space-y-3">
-                {certifications.map((cert) => (
-                  <View key={cert.id} className="flex flex-row items-center p-3 bg-blue-100 rounded-xl">
-                    <View className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
-                      <View className="i-mdi-certificate text-xl text-muted-foreground" />
-                    </View>
-                    <View className="flex-1">
-                      <Text className="text-sm font-medium text-foreground">{cert.cert_name}</Text>
-                      <Text className="text-xs text-muted-foreground mt-1">{formatDate(cert.obtain_date)}</Text>
-                    </View>
-                    <View
-                      className={`px-2 py-1 rounded ${cert.cert_status === 'active' ? 'bg-green-100' : 'bg-gray-50'}`}>
-                      <Text
-                        className={`text-xs ${cert.cert_status === 'active' ? 'text-muted-foreground' : 'text-muted-foreground'}`}>
-                        {cert.cert_status === 'active' ? '有效' : '已过期'}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-
-          {/* 最近课程 */}
-          <View className="bg-white rounded-lg p-6 border-2 border-gray-200 mb-4 shadow-sm">
-            <View className="flex flex-row items-center justify-between mb-4">
-              <Text className="text-lg font-semibold text-foreground">最近课程</Text>
-              <View className="i-mdi-history text-2xl text-blue-600" />
-            </View>
-
-            {recent_courses.length === 0 ? (
-              <View className="text-center py-8">
-                <View className="i-mdi-book-open-outline text-5xl text-muted-foreground/30 mb-2" />
-                <Text className="text-sm text-muted-foreground">暂无学习记录</Text>
-              </View>
-            ) : (
-              <View className="space-y-3">
-                {recent_courses.map((record) => {
-                  const statusInfo = getCourseStatusInfo(record.status)
-                  return (
-                    <View key={record.id} className="p-3 bg-gray-50 rounded-xl">
-                      <View className="flex flex-row items-center justify-between mb-2">
-                        <Text className="text-sm font-medium text-foreground flex-1">
-                          课程ID: {record.course_id.slice(0, 8)}...
-                        </Text>
-                        <View className={`px-2 py-1 rounded ${statusInfo.bgColor}`}>
-                          <Text className={`text-xs ${statusInfo.color}`}>{statusInfo.text}</Text>
-                        </View>
-                      </View>
-
-                      {/* 进度条 */}
-                      {record.status !== 'completed' && (
-                        <View className="mb-2">
-                          <View className="flex flex-row items-center justify-between mb-1">
-                            <Text className="text-xs text-muted-foreground">学习进度</Text>
-                            <Text className="text-xs text-muted-foreground">{record.progress}%</Text>
-                          </View>
-                          <View className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                            <View className="h-full bg-blue-100 rounded-full" style={{width: `${record.progress}%`}} />
-                          </View>
-                        </View>
-                      )}
-
-                      {/* 分数 */}
-                      {record.status === 'completed' && record.score !== null && (
-                        <View className="flex flex-row items-center">
-                          <View className="i-mdi-star text-sm text-yellow-500 mr-1" />
-                          <Text className="text-xs text-muted-foreground">考核分数: {record.score}分</Text>
-                        </View>
-                      )}
-
-                      <Text className="text-xs text-muted-foreground mt-1">{formatDate(record.created_at)}</Text>
-                    </View>
-                  )
-                })}
-              </View>
-            )}
-          </View>
-
-          {/* 快捷操作 */}
-          <View className="bg-white rounded-lg p-6 border-2 border-gray-200 mb-4 shadow-sm">
-            <View className="flex flex-row items-center justify-between mb-4">
-              <Text className="text-lg font-semibold text-foreground">学习中心</Text>
-              <View className="i-mdi-school text-2xl text-blue-600" />
-            </View>
-
-            <View className="grid grid-cols-2 gap-3">
-              <View
-                className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '培训课程功能开发中',
-                    icon: 'none'
-                  })
-                }}>
-                <View className="i-mdi-book-open-page-variant text-3xl text-muted-foreground mb-2" />
-                <Text className="text-xs text-muted-foreground font-medium text-center">浏览课程</Text>
-              </View>
-
-              <View
-                className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '考试功能开发中',
-                    icon: 'none'
-                  })
-                }}>
-                <View className="i-mdi-file-document-edit text-3xl text-muted-foreground mb-2" />
-                <Text className="text-xs text-muted-foreground font-medium text-center">参加考试</Text>
-              </View>
-
-              <View
-                className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '学习计划功能开发中',
-                    icon: 'none'
-                  })
-                }}>
-                <View className="i-mdi-calendar-check text-3xl text-muted-foreground mb-2" />
-                <Text className="text-xs text-muted-foreground font-medium text-center">学习计划</Text>
-              </View>
-
-              <View
-                className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '成长报告功能开发中',
-                    icon: 'none'
-                  })
-                }}>
-                <View className="i-mdi-chart-box text-3xl text-muted-foreground mb-2" />
-                <Text className="text-xs text-muted-foreground font-medium text-center">成长报告</Text>
+                <Text className="text-2xs text-gray-400">
+                  平均分 <Text className="font-semibold text-gray-700">{learning_progress.average_score}</Text>
+                </Text>
               </View>
             </View>
           </View>
         </View>
+
+        {/* 获得认证 */}
+        <Section title="获得认证" icon="i-mdi-certificate-outline">
+          {certifications.length === 0 ? (
+            <View className="py-6 flex flex-col items-center">
+              <Text className="i-mdi-certificate-outline text-4xl text-gray-200" />
+              <Text className="mt-2 text-xs text-gray-400">暂无认证，完成培训后自动发放</Text>
+            </View>
+          ) : (
+            certifications.map((c) => (
+              <View key={c.id} className="flex items-center p-3 bg-gray-50 rounded-xl mb-2.5 last:mb-0">
+                <View className="w-9 h-9 rounded-lg bg-primary-50 flex items-center justify-center mr-3">
+                  <Text className="i-mdi-certificate-outline text-lg text-primary-600" />
+                </View>
+                <View className="flex-1">
+                  <Text className="block text-sm font-medium text-gray-900">{c.cert_name}</Text>
+                  <Text className="block text-2xs text-gray-400 mt-0.5">{formatDate(c.obtain_date)}</Text>
+                </View>
+                <View
+                  className={`px-2 py-0.5 rounded-full ${c.cert_status === 'active' ? 'bg-success-50' : 'bg-gray-100'}`}>
+                  <Text className={`text-2xs ${c.cert_status === 'active' ? 'text-success-600' : 'text-gray-400'}`}>
+                    {c.cert_status === 'active' ? '有效' : '已过期'}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+        </Section>
+
+        {/* 最近课程 */}
+        <Section title="最近课程" icon="i-mdi-history">
+          {recent_courses.length === 0 ? (
+            <View className="py-6 flex flex-col items-center">
+              <Text className="i-mdi-book-open-page-variant-outline text-4xl text-gray-200" />
+              <Text className="mt-2 text-xs text-gray-400">暂无学习记录</Text>
+            </View>
+          ) : (
+            recent_courses.map((r) => {
+              const st = COURSE_STATUS[r.status] || {text: '未知', cls: 'bg-gray-100 text-gray-400'}
+              return (
+                <View key={r.id} className="p-3 bg-gray-50 rounded-xl mb-2.5 last:mb-0">
+                  <View className="flex items-center justify-between mb-2">
+                    <Text className="text-sm font-medium text-gray-900 flex-1 truncate">
+                      课程 {r.course_id.slice(0, 8)}
+                    </Text>
+                    <View className={`px-2 py-0.5 rounded-full ${st.cls}`}>
+                      <Text className="text-2xs">{st.text}</Text>
+                    </View>
+                  </View>
+                  {r.status !== 'completed' && (
+                    <View>
+                      <View className="flex items-center justify-between mb-1">
+                        <Text className="text-2xs text-gray-400">进度</Text>
+                        <Text className="text-2xs text-gray-500">{r.progress}%</Text>
+                      </View>
+                      <View className="h-1 bg-gray-200 rounded-full overflow-hidden">
+                        <View className="h-full bg-primary-500 rounded-full" style={{width: `${r.progress}%`}} />
+                      </View>
+                    </View>
+                  )}
+                  {r.status === 'completed' && r.score !== null && (
+                    <View className="flex items-center">
+                      <Text className="i-mdi-star text-xs text-warning-500 mr-1" />
+                      <Text className="text-2xs text-gray-500">考核 {r.score} 分</Text>
+                    </View>
+                  )}
+                  <Text className="block text-2xs text-gray-400 mt-1.5">{formatDate(r.created_at)}</Text>
+                </View>
+              )
+            })
+          )}
+        </Section>
+
+        {/* 学习中心（开发中功能保持 toast 反馈） */}
+        <Section title="学习中心" icon="i-mdi-school-outline">
+          <View className="grid grid-cols-4 gap-3">
+            {[
+              {icon: 'i-mdi-book-open-page-variant-outline', label: '浏览课程'},
+              {icon: 'i-mdi-file-document-edit-outline', label: '参加考试'},
+              {icon: 'i-mdi-calendar-check-outline', label: '学习计划'},
+              {icon: 'i-mdi-chart-box-outline', label: '成长报告'}
+            ].map((x) => (
+              <View
+                key={x.label}
+                className="flex flex-col items-center"
+                hoverClass="opacity-60"
+                onClick={() => Taro.showToast({title: '功能开发中', icon: 'none'})}>
+                <View className="w-11 h-11 rounded-xl bg-primary-50 flex items-center justify-center">
+                  <Text className={`${x.icon} text-xl text-primary-600`} />
+                </View>
+                <Text className="mt-1.5 text-2xs text-gray-600">{x.label}</Text>
+              </View>
+            ))}
+          </View>
+        </Section>
+        <View className="h-6" />
       </ScrollView>
     </View>
   )
