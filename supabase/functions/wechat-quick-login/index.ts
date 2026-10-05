@@ -9,8 +9,8 @@
  * 5. 返回登录结果
  */
 
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
-import {createClient} from 'jsr:@supabase/supabase-js@2'
+
+import {createClient} from 'npm:@supabase/supabase-js@2'
 
 // CORS 头
 const corsHeaders = {

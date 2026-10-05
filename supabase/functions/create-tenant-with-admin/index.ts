@@ -1,4 +1,4 @@
-import {createClient} from 'jsr:@supabase/supabase-js@2'
+import {createClient} from 'npm:@supabase/supabase-js@2'
 
 // Edge Function: 创建租户并设置管理员
 // 使用 service_role_key，绕过 RLS 策略限制

@@ -1,5 +1,5 @@
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
-import {createClient} from 'jsr:@supabase/supabase-js@2'
+
+import {createClient} from 'npm:@supabase/supabase-js@2'
 
 // ⚠️ G0-A-R 登记: LEGACY AUTHORITY PATH — TO BE RETIRED
 // 本函数按"手机号匹配 tenants.admin_phone"发行 tenant_admin 权限，
