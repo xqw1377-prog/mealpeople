@@ -51,7 +51,10 @@ BEGIN
     FROM public.profiles
    WHERE tenant_id IS NOT NULL
      AND id NOT IN (SELECT coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid)
-                      FROM public.invitation_code_uses);
+                      FROM public.invitation_code_uses)
+     -- g0bb 黑盒夹具用户（平台置备的测试身份，run-logs/blackbox-env.sh 留档；非攻击产物）
+     AND id NOT IN ('c57cb78e-027b-4303-a5b1-942a55c5bc53','65dce022-39b8-4d84-9d7c-20bbbdb97516',
+                    '10d855a3-254d-4c4f-83a7-cebe388ab713','dedd631b-4b3a-47e0-99e4-ea96e3947c33');
   IF v_changed > 0 THEN
     RAISE EXCEPTION 'S5 FAIL: 存在无兑换记录却拥有租户的 profile（% 行）——疑似未授权 membership', v_changed;
   END IF;
