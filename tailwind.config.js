@@ -13,8 +13,33 @@ module.exports = {
   content: ['./public/index.html', './src/**/*.{html,js,ts,jsx,tsx}'],
   theme: {
     extend: {
-      colors,
+      colors: {
+        ...colors,
+        // ============================================================
+        // 工作旅途 DS · Design Tokens v1（2026-10-05 前端重设计一期）
+        // 品牌主色：暖橙系（承接 TabBar 爱马仕橙 #FF6600）
+        // 用法：text-primary-600 / bg-primary-50 / border-primary-200 ...
+        // ============================================================
+        primary: {
+          50: '#FFF7ED',
+          100: '#FFEDD5',
+          200: '#FED7AA',
+          300: '#FDBA74',
+          400: '#FB923C',
+          500: '#FF6600', // 品牌橙（TabBar selectedColor 同源）
+          600: '#EA580C',
+          700: '#C2410C',
+          800: '#9A3412',
+          900: '#7C2D12',
+        },
+        success: { 50: '#F0FDF4', 500: '#22C55E', 600: '#16A34A', 700: '#15803D' },
+        warning: { 50: '#FFFBEB', 500: '#F59E0B', 600: '#D97706', 700: '#B45309' },
+        danger: { 50: '#FEF2F2', 500: '#EF4444', 600: '#DC2626', 700: '#B91C1C' },
+        info: { 50: '#EFF6FF', 500: '#3B82F6', 600: '#2563EB', 700: '#1D4ED8' },
+      },
       fontSize: {
+        // DS 字阶：2xs=11px 用于角标/辅助说明
+        '2xs': ['0.6875rem', { lineHeight: '1rem' }],
         // 在原有基础上增加字体大小
         'xs': ['0.8125rem', { lineHeight: '1.25rem' }],     // 13px (原 12px)
         'sm': ['0.9375rem', { lineHeight: '1.375rem' }],    // 15px (原 14px)

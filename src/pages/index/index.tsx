@@ -1,15 +1,10 @@
 /**
- * 员工工作台页面 - 视觉优化版
- * 设计理念：高效好用、交互简单、视觉现代
- *
- * 核心优化：
- * 1. 现代化视觉设计 - 渐变背景、卡片阴影、流畅动画
- * 2. 简化交互流程 - 一键直达，减少点击次数
- * 3. 清晰的信息层次 - 卡片式布局，一目了然
- * 4. 智能功能推荐 - 根据用户角色展示相关功能
- * 5. 友好的视觉反馈 - 加载状态、操作提示、错误处理
+ * 工作台（首页）· 工作旅途 DS 重设计版 V2（2026-10-05）
+ * 设计定调样板页：
+ *  - 品牌主色 primary（暖橙）贯穿，告别多色渐变堆叠
+ *  - 单一视觉重心：HeroHeader + 数据条 + 功能宫格
+ *  - 功能全部保留，路径不变；图标统一 iconify
  */
-
 import {ScrollView, Text, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
@@ -19,434 +14,206 @@ import {getEmployeeByUserId} from '@/db/api'
 import type {Employee} from '@/db/types'
 import {useTenantStore} from '@/store/tenant'
 
-// 快捷操作配置
 interface QuickAction {
   id: string
   name: string
-  desc: string
   icon: string
-  iconColor: string
-  bgGradient: string
+  tone: 'primary' | 'success' | 'info' | 'warning'
   path: string
-  badge?: string
 }
 
-// 核心功能 - 优化视觉设计
+// 员工常用功能（图标统一 iconify；色调四档轮换，不再逐项渐变）
 const CORE_ACTIONS: QuickAction[] = [
-  {
-    id: 'work-log',
-    name: '工作记录',
-    desc: '记录每日工作',
-    icon: 'i-mdi-notebook-edit',
-    iconColor: 'text-blue-600',
-    bgGradient: 'bg-gradient-to-br from-blue-50 to-blue-100',
-    path: '/pages/work-log/index'
-  },
-  {
-    id: 'attendance',
-    name: '考勤打卡',
-    desc: '上下班打卡',
-    icon: 'i-mdi-clock-check',
-    iconColor: 'text-green-600',
-    bgGradient: 'bg-gradient-to-br from-green-50 to-green-100',
-    path: '/packageG/pages/working/attendance/index'
-  },
-  {
-    id: 'my-schedule',
-    name: '我的班次',
-    desc: '查看排班表',
-    icon: 'i-mdi-calendar-today',
-    iconColor: 'text-purple-600',
-    bgGradient: 'bg-gradient-to-br from-purple-50 to-purple-100',
-    path: '/packageB/pages/scheduling/index'
-  },
-  {
-    id: 'leave',
-    name: '请假申请',
-    desc: '提交请假单',
-    icon: 'i-mdi-calendar-clock',
-    iconColor: 'text-orange-600',
-    bgGradient: 'bg-gradient-to-br from-orange-50 to-orange-100',
-    path: '/packageG/pages/my-leave/index'
-  },
-  {
-    id: 'onboarding',
-    name: '我的入职',
-    desc: '入职流程跟踪',
-    icon: 'i-mdi-account-check',
-    iconColor: 'text-cyan-600',
-    bgGradient: 'bg-gradient-to-br from-cyan-50 to-cyan-100',
-    path: '/packageH/pages/my-onboarding/index'
-  },
-  {
-    id: 'training',
-    name: '我的培训',
-    desc: '培训课程学习',
-    icon: 'i-mdi-school',
-    iconColor: 'text-indigo-600',
-    bgGradient: 'bg-gradient-to-br from-indigo-50 to-indigo-100',
-    path: '/packageJ/pages/my-training/index'
-  },
-  {
-    id: 'performance',
-    name: '我的绩效',
-    desc: '绩效考核查看',
-    icon: 'i-mdi-chart-line',
-    iconColor: 'text-emerald-600',
-    bgGradient: 'bg-gradient-to-br from-emerald-50 to-emerald-100',
-    path: '/packageF/pages/my-performance/index'
-  },
-  {
-    id: 'salary',
-    name: '我的薪酬',
-    desc: '工资明细查询',
-    icon: 'i-mdi-cash',
-    iconColor: 'text-amber-600',
-    bgGradient: 'bg-gradient-to-br from-amber-50 to-amber-100',
-    path: '/packageF/pages/my-salary/index'
-  }
+  {id: 'work-log', name: '工作记录', icon: 'i-mdi-notebook-edit-outline', tone: 'info', path: '/pages/work-log/index'},
+  {id: 'attendance', name: '考勤打卡', icon: 'i-mdi-clock-check-outline', tone: 'success', path: '/packageG/pages/working/attendance/index'},
+  {id: 'my-schedule', name: '我的班次', icon: 'i-mdi-calendar-today', tone: 'primary', path: '/packageB/pages/scheduling/index'},
+  {id: 'leave', name: '请假申请', icon: 'i-mdi-calendar-clock', tone: 'warning', path: '/packageG/pages/my-leave/index'},
+  {id: 'onboarding', name: '我的入职', icon: 'i-mdi-account-check-outline', tone: 'info', path: '/packageH/pages/my-onboarding/index'},
+  {id: 'training', name: '我的培训', icon: 'i-mdi-school-outline', tone: 'primary', path: '/packageJ/pages/my-training/index'},
+  {id: 'performance', name: '我的绩效', icon: 'i-mdi-chart-line', tone: 'success', path: '/packageF/pages/my-performance/index'},
+  {id: 'salary', name: '我的薪酬', icon: 'i-mdi-cash-multiple', tone: 'warning', path: '/packageF/pages/my-salary/index'},
 ]
 
-// 管理功能 - 优化视觉设计
+// 管理功能（仅店长/经理可见）
 const ADMIN_ACTIONS: QuickAction[] = [
-  {
-    id: 'employee-manage',
-    name: '员工管理',
-    desc: '员工全生命周期',
-    icon: 'i-mdi-account-group',
-    iconColor: 'text-blue-600',
-    bgGradient: 'bg-gradient-to-br from-blue-50 to-blue-100',
-    path: '/pages/employee-hub/index'
-  },
-  {
-    id: 'onboarding-manage',
-    name: '入职管理',
-    desc: '入职全流程',
-    icon: 'i-mdi-account-plus',
-    iconColor: 'text-green-600',
-    bgGradient: 'bg-gradient-to-br from-green-50 to-green-100',
-    path: '/packageH/pages/onboarding-management/index'
-  },
-  {
-    id: 'offboarding-manage',
-    name: '离职管理',
-    desc: '离职全流程',
-    icon: 'i-mdi-account-remove',
-    iconColor: 'text-red-600',
-    bgGradient: 'bg-gradient-to-br from-red-50 to-red-100',
-    path: '/packageH/pages/offboarding-management/index'
-  },
-  {
-    id: 'schedule-manage',
-    name: '排班管理',
-    desc: '智能排班配置',
-    icon: 'i-mdi-calendar-multiple',
-    iconColor: 'text-purple-600',
-    bgGradient: 'bg-gradient-to-br from-purple-50 to-purple-100',
-    path: '/packageB/pages/schedule-center/index'
-  }
+  {id: 'employee-manage', name: '员工管理', icon: 'i-mdi-account-group-outline', tone: 'primary', path: '/pages/employee-hub/index'},
+  {id: 'onboarding-manage', name: '入职管理', icon: 'i-mdi-account-plus-outline', tone: 'info', path: '/packageH/pages/onboarding-management/index'},
+  {id: 'offboarding-manage', name: '离职管理', icon: 'i-mdi-account-remove-outline', tone: 'warning', path: '/packageH/pages/offboarding-management/index'},
+  {id: 'schedule-manage', name: '排班管理', icon: 'i-mdi-calendar-month-outline', tone: 'success', path: '/packageB/pages/schedule-center/index'},
 ]
+
+const TONE_BG: Record<QuickAction['tone'], string> = {
+  primary: 'bg-primary-50 text-primary-600',
+  success: 'bg-success-50 text-success-600',
+  info: 'bg-info-50 text-info-600',
+  warning: 'bg-warning-50 text-warning-600',
+}
+
+function ActionGrid({actions}: {actions: QuickAction[]}) {
+  return (
+    <View className='grid grid-cols-4 gap-y-5'>
+      {actions.map(a => (
+        <View
+          key={a.id}
+          className='flex flex-col items-center'
+          hoverClass='opacity-70'
+          onClick={() => Taro.navigateTo({url: a.path})}
+        >
+          <View className={`w-12 h-12 rounded-xl flex items-center justify-center ${TONE_BG[a.tone]}`}>
+            <Text className={`${a.icon} text-2xl`} />
+          </View>
+          <Text className='mt-1.5 text-xs text-gray-700 leading-tight'>{a.name}</Text>
+        </View>
+      ))}
+    </View>
+  )
+}
 
 const EmployeeWorkspace: React.FC = () => {
   const {user} = useAuth({guard: true})
   const currentTenant = useTenantStore((state) => state.currentTenant)
-
-  // 员工信息
   const [employee, setEmployee] = useState<Employee | null>(null)
-  const [_loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
-  // 获取问候语
   const getGreeting = () => {
-    const hour = new Date().getHours()
-    if (hour < 6) return '夜深了'
-    if (hour < 9) return '早上好'
-    if (hour < 12) return '上午好'
-    if (hour < 14) return '中午好'
-    if (hour < 18) return '下午好'
-    if (hour < 22) return '晚上好'
+    const h = new Date().getHours()
+    if (h < 6) return '夜深了'
+    if (h < 9) return '早上好'
+    if (h < 12) return '上午好'
+    if (h < 14) return '中午好'
+    if (h < 18) return '下午好'
+    if (h < 22) return '晚上好'
     return '夜深了'
   }
 
-  // 获取日期字符串
   const getDateString = () => {
-    const date = new Date()
-    const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-    const year = date.getFullYear()
-    const month = date.getMonth() + 1
-    const day = date.getDate()
-    const weekDay = weekDays[date.getDay()]
-    return `${year}年${month}月${day}日 ${weekDay}`
+    const d = new Date()
+    const w = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()]
+    return `${d.getMonth() + 1}月${d.getDate()}日 ${w}`
   }
 
-  // 加载员工信息
   const loadEmployee = useCallback(async () => {
     if (!user?.id) return
-
     try {
-      setLoading(true)
-      const data = await getEmployeeByUserId(user.id)
-      setEmployee(data)
-    } catch (error) {
-      console.error('加载员工信息失败:', error)
-    } finally {
-      setLoading(false)
+      setEmployee(await getEmployeeByUserId(user.id))
+    } catch (e) {
+      console.error('加载员工信息失败:', e)
     }
   }, [user?.id])
 
-  // 页面显示时加载数据
-  useDidShow(() => {
-    loadEmployee()
-  })
+  useDidShow(() => { loadEmployee() })
 
-  // 刷新数据
-  const handleRefresh = () => {
-    Taro.showLoading({title: '刷新中...'})
-    loadEmployee().finally(() => {
-      Taro.hideLoading()
-      Taro.showToast({
-        title: '刷新成功',
-        icon: 'success',
-        duration: 1500
-      })
-    })
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await loadEmployee()
+    setRefreshing(false)
+    Taro.showToast({title: '已刷新', icon: 'success', duration: 1200})
   }
 
-  // 处理功能卡片点击
-  const handleActionClick = (path: string) => {
-    Taro.navigateTo({url: path})
-  }
+  const isAdmin = employee?.position === '店长' || employee?.position === '经理'
 
-  // 租户检查
+  // ---- 未选租户：引导空态 ----
   if (!currentTenant) {
     return (
-      <View className="min-h-screen bg-gray-50">
-        <ScrollView scrollY className="h-screen box-border bg-transparent">
-          <View className="p-4">
-            {/* 空状态卡片 */}
-            <View className="bg-white rounded-lg p-8 border-2 border-gray-200 mt-20">
-              {/* 大图标 */}
-              <View className="flex justify-center mb-6">
-                <View className="w-24 h-24 rounded-full bg-blue-100 flex items-center justify-center">
-                  <View className="i-mdi-office-building text-5xl text-muted-foreground" />
-                </View>
-              </View>
-
-              {/* 标题 */}
-              <Text className="text-2xl font-bold text-center text-foreground mb-3">请先选择租户</Text>
-
-              {/* 描述 */}
-              <Text className="text-sm text-center text-muted-foreground leading-relaxed mb-6">
-                工作台需要在租户上下文中使用{'\n'}
-                请先选择一个租户，然后开始您的工作
-              </Text>
-
-              {/* 操作按钮 */}
-              <View
-                className="w-full bg-blue-600 text-white py-4 rounded-xl active:opacity-80"
-                onClick={() => {
-                  Taro.navigateTo({
-                    url: '/pages/tenant-select/index',
-                    fail: (err) => {
-                      console.error('导航失败:', err)
-                      Taro.showToast({title: '页面跳转失败', icon: 'none'})
-                    }
-                  })
-                }}>
-                <View className="flex items-center justify-center gap-2">
-                  <View className="i-mdi-office-building text-xl text-blue-600" />
-                  <Text className="text-base text-white font-medium">选择租户</Text>
-                </View>
-              </View>
-
-              {/* 帮助提示 */}
-              <View className="mt-6 bg-blue-100 rounded-xl p-4">
-                <View className="flex items-center gap-2 mb-2">
-                  <View className="i-mdi-information text-lg text-muted-foreground" />
-                  <Text className="text-sm font-bold text-foreground">温馨提示</Text>
-                </View>
-                <Text className="text-xs text-muted-foreground leading-relaxed">
-                  • 如果您还没有租户，请先创建或加入一个{'\n'}• 租户是系统的基本管理单元{'\n'}•
-                  每个租户拥有独立的数据和配置
-                </Text>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
+      <View className='min-h-screen bg-gray-50 flex flex-col items-center justify-center px-8'>
+        <View className='w-20 h-20 rounded-full bg-primary-50 flex items-center justify-center'>
+          <Text className='i-mdi-office-building-outline text-5xl text-primary-500' />
+        </View>
+        <Text className='mt-5 text-lg font-bold text-gray-900'>请先选择企业</Text>
+        <Text className='mt-2 text-sm text-gray-400 text-center leading-relaxed'>
+          工作台需要在企业上下文中使用{'\n'}选择一个企业后开始工作
+        </Text>
+        <View
+          className='mt-8 px-10 py-3 rounded-full bg-primary-500 text-white text-sm font-medium'
+          hoverClass='opacity-80'
+          onClick={() => Taro.navigateTo({url: '/pages/tenant-select/index'})}
+        >
+          选择企业
+        </View>
       </View>
     )
   }
 
+  // ---- 主界面 ----
   return (
-    <View className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-      <ScrollView scrollY className="h-screen box-border bg-transparent">
-        <View className="p-4">
-          {/* 顶部问候卡片 - 优化视觉设计 */}
-          <View className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl p-6 shadow-lg mb-4 relative overflow-hidden">
-            {/* 装饰性背景图案 */}
-            <View className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16" />
-            <View className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full -ml-12 -mb-12" />
+    <View className='min-h-screen bg-gray-50'>
+      <ScrollView scrollY className='h-screen box-border bg-transparent'>
+        {/* 沉浸式品牌头 */}
+        <View className='relative overflow-hidden bg-primary-500 px-4 pt-12 pb-16'>
+          <View className='absolute -top-12 -right-12 w-44 h-44 rounded-full bg-white/10' />
+          <View className='absolute top-8 right-20 w-20 h-20 rounded-full bg-white/5' />
+          <View className='relative flex items-start justify-between'>
+            <View>
+              <View className='flex items-center'>
+                <Text className='text-xl font-bold text-white'>{getGreeting()}，{employee?.name || '同事'}</Text>
+              </View>
+              <Text className='mt-1 text-xs text-white/75'>{getDateString()} · {currentTenant.name}</Text>
+            </View>
+            <View className='flex items-center gap-1.5' onClick={handleRefresh}>
+              <Text className={`i-mdi-refresh text-lg text-white/90 ${refreshing ? 'animate-spin' : ''}`} />
+              <Text className='text-xs text-white/75'>刷新</Text>
+            </View>
+          </View>
+        </View>
 
-            {/* 刷新按钮 */}
+        {/* 今日概况条（叠加在 Hero 底沿） */}
+        <View className='px-4 -mt-10 relative z-10'>
+          <View className='bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3.5 flex items-center'>
+            <View className='flex-1 text-center'>
+              <Text className='i-mdi-calendar-check-outline text-base text-primary-500' />
+              <Text className='block mt-1 text-xs text-gray-400'>今日班次</Text>
+              <Text className='text-sm font-semibold text-gray-900'>待查询</Text>
+            </View>
+            <View className='w-px h-8 bg-gray-100' />
+            <View className='flex-1 text-center'>
+              <Text className='i-mdi-clock-fast text-base text-success-500' />
+              <Text className='block mt-1 text-xs text-gray-400'>打卡状态</Text>
+              <Text className='text-sm font-semibold text-gray-900'>未打卡</Text>
+            </View>
+            <View className='w-px h-8 bg-gray-100' />
             <View
-              className="absolute top-4 right-4 w-10 h-10 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center active:opacity-70 z-10"
-              onClick={handleRefresh}>
-              <View className="i-mdi-refresh text-xl text-white" />
-            </View>
-
-            <View className="flex items-center justify-between mb-4 pr-12 relative z-10">
-              <View className="flex-1">
-                <Text className="text-white text-2xl font-bold mb-1">{getGreeting()}！</Text>
-                <Text className="text-white/80 text-sm mb-3">{getDateString()}</Text>
-                <Text className="text-white text-base font-medium">{employee?.name || '员工'}，欢迎使用工作旅途</Text>
-              </View>
-              <View className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-md">
-                <View className="i-mdi-account-circle text-4xl text-white" />
-              </View>
-            </View>
-
-            {/* 租户信息 */}
-            <View className="bg-white/20 backdrop-blur-sm rounded-xl p-4 relative z-10">
-              <View className="flex items-center gap-2">
-                <View className="w-10 h-10 rounded-xl bg-white/30 flex items-center justify-center">
-                  <View className="i-mdi-office-building text-xl text-white" />
-                </View>
-                <View className="flex-1">
-                  <Text className="text-xs text-white/70 mb-0.5">当前租户</Text>
-                  <Text className="text-sm font-bold text-white">{currentTenant.name}</Text>
-                </View>
-                <View
-                  className="px-4 py-2 bg-white/30 backdrop-blur-sm rounded-xl shadow-sm active:opacity-70"
-                  onClick={() => Taro.navigateTo({url: '/pages/tenant-select/index'})}>
-                  <Text className="text-xs text-white font-medium">切换</Text>
-                </View>
-              </View>
+              className='flex-1 text-center'
+              onClick={() => Taro.navigateTo({url: '/pages/quick-start/index'})}
+              hoverClass='opacity-70'
+            >
+              <Text className='i-mdi-rocket-launch-outline text-base text-warning-500' />
+              <Text className='block mt-1 text-xs text-gray-400'>新手引导</Text>
+              <Text className='text-sm font-semibold text-primary-600'>去开始</Text>
             </View>
           </View>
+        </View>
 
-          {/* 快速开始提示卡片 - 优化视觉设计 */}
-          <View className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-5 shadow-lg mb-4 relative overflow-hidden">
-            {/* 装饰性背景图案 */}
-            <View className="absolute top-0 right-0 w-24 h-24 bg-white/10 rounded-full -mr-12 -mt-12" />
-
-            <View className="flex items-center gap-3 relative z-10">
-              <View className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md">
-                <View className="i-mdi-rocket-launch text-3xl text-white" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-base font-bold text-white mb-1">新手？快速开始</Text>
-                <Text className="text-xs text-white/80">
-                  {employee ? '了解系统功能，快速上手' : '完成配置，开始使用系统'}
-                </Text>
-              </View>
-              <View
-                className="px-5 py-2.5 bg-white/30 backdrop-blur-sm rounded-xl active:opacity-80 shadow-sm"
-                onClick={() => Taro.navigateTo({url: '/pages/quick-start/index'})}>
-                <Text className="text-sm text-white font-bold">开始</Text>
-              </View>
-            </View>
+        {/* 常用功能 */}
+        <View className='mx-4 mt-4 bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]'>
+          <View className='flex items-center justify-between mb-4'>
+            <Text className='text-base font-semibold text-gray-900'>常用功能</Text>
+            <Text className='text-2xs text-gray-400'>一键直达</Text>
           </View>
+          <ActionGrid actions={CORE_ACTIONS} />
+        </View>
 
-          {/* 快捷功能区 */}
-          <View className="bg-white rounded-2xl p-6 shadow-sm mb-4">
-            <View className="flex items-center justify-between mb-6">
-              <View className="flex items-center gap-3">
-                <View className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-md">
-                  <View className="i-mdi-apps text-2xl text-white" />
-                </View>
-                <View>
-                  <Text className="text-lg font-bold text-foreground">常用功能</Text>
-                  <Text className="text-xs text-muted-foreground">一键直达，高效办公</Text>
-                </View>
+        {/* 管理功能 */}
+        {isAdmin && (
+          <View className='mx-4 mt-4 bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]'>
+            <View className='flex items-center justify-between mb-4'>
+              <View className='flex items-center'>
+                <Text className='text-base font-semibold text-gray-900'>管理功能</Text>
+                <Text className='ml-2 px-2 py-0.5 rounded-full bg-primary-50 text-2xs text-primary-600 font-medium'>管理</Text>
               </View>
             </View>
-
-            {/* 功能网格 - 优化视觉设计 */}
-            <View className="flex flex-row flex-wrap -mx-2">
-              {CORE_ACTIONS.map((action) => (
-                <View key={action.id} className="w-1/4 px-2 mb-4">
-                  <View
-                    className="flex flex-col items-center active:opacity-70 transition-all"
-                    onClick={() => handleActionClick(action.path)}>
-                    <View
-                      className={`w-16 h-16 rounded-2xl ${action.bgGradient} flex items-center justify-center mb-2 shadow-sm border border-gray-100 active:scale-95 transition-transform`}>
-                      <View className={`${action.icon} text-3xl ${action.iconColor}`} />
-                    </View>
-                    <Text className="text-xs text-center text-foreground font-medium break-keep leading-tight">
-                      {action.name}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+            <ActionGrid actions={ADMIN_ACTIONS} />
           </View>
+        )}
 
-          {/* 管理功能区 - 仅管理员可见 */}
-          {employee?.position === '店长' || employee?.position === '经理' ? (
-            <View className="bg-gradient-to-br from-purple-50 to-blue-50 rounded-2xl p-6 shadow-sm mb-4 border border-purple-100">
-              <View className="flex items-center justify-between mb-6">
-                <View className="flex items-center gap-3">
-                  <View className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-md">
-                    <View className="i-mdi-shield-crown text-2xl text-white" />
-                  </View>
-                  <View>
-                    <Text className="text-lg font-bold text-foreground">管理功能</Text>
-                    <Text className="text-xs text-muted-foreground">专属管理工具</Text>
-                  </View>
-                </View>
-                <View className="bg-gradient-to-r from-purple-500 to-purple-600 px-3 py-1.5 rounded-full shadow-sm">
-                  <Text className="text-xs text-white font-bold">管理员</Text>
-                </View>
-              </View>
-
-              {/* 管理功能网格 - 优化视觉设计 */}
-              <View className="flex flex-row flex-wrap -mx-2">
-                {ADMIN_ACTIONS.map((action) => (
-                  <View key={action.id} className="w-1/4 px-2 mb-4">
-                    <View
-                      className="flex flex-col items-center active:opacity-70 transition-all"
-                      onClick={() => handleActionClick(action.path)}>
-                      <View
-                        className={`w-16 h-16 rounded-2xl ${action.bgGradient} flex items-center justify-center mb-2 shadow-sm border border-gray-100 active:scale-95 transition-transform`}>
-                        <View className={`${action.icon} text-3xl ${action.iconColor}`} />
-                      </View>
-                      <Text className="text-xs text-center text-foreground font-medium break-keep leading-tight">
-                        {action.name}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
-
-          {/* 今日提示卡片 - 优化视觉设计 */}
-          <View className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-6 shadow-sm mb-4 border border-amber-100">
-            <View className="flex items-start gap-3">
-              <View className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center flex-shrink-0 shadow-md">
-                <View className="i-mdi-lightbulb text-2xl text-white" />
-              </View>
-              <View className="flex-1">
-                <Text className="text-base font-bold text-foreground mb-3">温馨提示</Text>
-                <View className="space-y-2">
-                  <View className="flex items-start gap-2">
-                    <View className="i-mdi-check-circle text-base text-green-600 mt-0.5" />
-                    <Text className="text-sm text-foreground flex-1">记得及时填写工作日志</Text>
-                  </View>
-                  <View className="flex items-start gap-2">
-                    <View className="i-mdi-check-circle text-base text-green-600 mt-0.5" />
-                    <Text className="text-sm text-foreground flex-1">完成今日考勤打卡</Text>
-                  </View>
-                  <View className="flex items-start gap-2">
-                    <View className="i-mdi-check-circle text-base text-green-600 mt-0.5" />
-                    <Text className="text-sm text-foreground flex-1">如有请假需求，请提前提交申请</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
+        {/* 今日待办提示（轻量一行式，替代原大卡片） */}
+        <View className='mx-4 mt-4 mb-6 flex items-center gap-2 px-3.5 py-3 rounded-xl bg-white border border-gray-100'>
+          <Text className='i-mdi-lightbulb-on-outline text-base text-warning-500' />
+          <Text className='flex-1 text-xs text-gray-500 leading-relaxed'>
+            今日事今日毕：填写工作日志 · 完成考勤打卡 · 请假提前申请
+          </Text>
+          <View hoverClass='opacity-60' onClick={() => Taro.navigateTo({url: '/pages/notifications/index'})}>
+            <Text className='i-mdi-chevron-right text-base text-gray-300' />
           </View>
-
-          {/* 底部占位 */}
-          <View className="h-4" />
         </View>
       </ScrollView>
     </View>
