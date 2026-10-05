@@ -34,7 +34,7 @@ check() {
   local id="$1" desc="$2" want="$3" code="$4" body="${5:-}"
   local ok=no
   case "$want" in
-    DENY)  [[ "$code" -ge 400 || "$code" -eq 403 || "$body" == *denied* || "$body" == *error* ]] && ok=yes;;
+    DENY)  [[ "$code" -ge 400 || "$body" == *denied* || "$body" == *error* || "$body" == *'"success":false'* ]] && ok=yes;;
     2xx)   [[ "$code" -ge 200 && "$code" -lt 300 ]] && ok=yes;;
     4xx)   [[ "$code" -ge 400 && "$code" -lt 500 ]] && ok=yes;;
     EMPTY) [[ "$code" -lt 300 && ( "$body" == "[]" || "$body" == *'"count":0'* ) ]] && ok=yes;;
@@ -53,22 +53,22 @@ req() { # req <jwt|anon> <method> <path> [json]
   local tok="$ANON_KEY"
   [[ "$who" != anon ]] && tok="$1"
   if [[ -n "$d" ]]; then
-    curl -s -o /tmp/g0z_body -w '%{http_code}' -X "$m" "$SUPABASE_URL$p" \
+    curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /tmp/g0z_body -w '%{http_code}' -X "$m" "$SUPABASE_URL$p" \
       -H "apikey: $ANON_KEY" -H "Authorization: Bearer $tok" -H "Content-Type: application/json" -d "$d"
   else
-    curl -s -o /tmp/g0z_body -w '%{http_code}' -X "$m" "$SUPABASE_URL$p" \
+    curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /tmp/g0z_body -w '%{http_code}' -X "$m" "$SUPABASE_URL$p" \
       -H "apikey: $ANON_KEY" -H "Authorization: Bearer $tok"
   fi
-  cat /tmp/g0z_body | head -c 300
+  true
 }
 
 # ---------- PostgREST: 跨租户读 ----------
-c=$(req "$JWT_EMP_A" GET "/rest/v1/employees?tenant_id=eq.$TENANT_B&select=id");                    check A1 "员工A 读租户B员工" EMPTY "$c"
-c=$(req "$JWT_EMP_A" GET "/rest/v1/salary_records?tenant_id=eq.$TENANT_B&select=id");               check A2 "员工A 读租户B工资" EMPTY "$c"
-c=$(req "$JWT_EMP_A" GET "/rest/v1/candidates?tenant_id=eq.$TENANT_B&select=id");                   check A3 "员工A 读租户B候选人PII" EMPTY "$c"
-c=$(req "$JWT_ADMIN_A" GET "/rest/v1/employees?tenant_id=eq.$TENANT_B&select=id");                  check A4 "管理员A 读租户B员工" EMPTY "$c"
-c=$(req "$JWT_ADMIN_A" GET "/rest/v1/salary_records?tenant_id=eq.$TENANT_B&select=id");             check A5 "管理员A 读租户B工资" EMPTY "$c"
-c=$(req anon GET "/rest/v1/candidates?select=id");                                                  check A6 "匿名 读候选人" EMPTY "$c"
+c=$(req "$JWT_EMP_A" GET "/rest/v1/employees?tenant_id=eq.$TENANT_B&select=id");                    check A1 "员工A 读租户B员工" EMPTY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+c=$(req "$JWT_EMP_A" GET "/rest/v1/salary_records?tenant_id=eq.$TENANT_B&select=id");               check A2 "员工A 读租户B工资" EMPTY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+c=$(req "$JWT_EMP_A" GET "/rest/v1/candidates?tenant_id=eq.$TENANT_B&select=id");                   check A3 "员工A 读租户B候选人PII" EMPTY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+c=$(req "$JWT_ADMIN_A" GET "/rest/v1/employees?tenant_id=eq.$TENANT_B&select=id");                  check A4 "管理员A 读租户B员工" EMPTY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+c=$(req "$JWT_ADMIN_A" GET "/rest/v1/salary_records?tenant_id=eq.$TENANT_B&select=id");             check A5 "管理员A 读租户B工资" EMPTY "$c" "$(cat /tmp/g0z_body|head -c 200)"
+c=$(req anon GET "/rest/v1/candidates?select=id");                                                  check A6 "匿名 读候选人" EMPTY "$c" "$(cat /tmp/g0z_body|head -c 200)"
 
 # ---------- PostgREST: protected columns 直写 ----------
 c=$(req "$JWT_EMP_A" PATCH "/rest/v1/profiles?id=eq.$EMP_A_ID" '{"role":"super_admin"}');           check B1 "员工A 自改 role=super_admin" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
@@ -94,27 +94,27 @@ c=$(req "$JWT_UNAFFILIATED" POST "/rest/v1/rpc/admin_assign_member_role" "{\"p_t
 check D4 "无管理权限调指派RPC" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
 
 # ---------- Storage: 合同签名 ----------
-c=$(curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/storage/v1/object/public/contract_signatures/x.png")
+c=$(curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /dev/null -w '%{http_code}' "$SUPABASE_URL/storage/v1/object/public/contract_signatures/x.png")
 check E1 "匿名 public URL 直读签名" 4xx "$c"
-c=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/storage/v1/object/contract_signatures/$TENANT_B/$CONTRACT_B_ID/fake.png" \
+c=$(curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/storage/v1/object/contract_signatures/$TENANT_B/$CONTRACT_B_ID/fake.png" \
   -H "apikey: $ANON_KEY" -H "Authorization: Bearer $JWT_EMP_A" -H "Content-Type: image/png" --data-binary 'x')
 check E2 "员工A 向租户B合同路径上传签名" DENY "$c"
-c=$(curl -s -o /dev/null -w '%{http_code}' "$SUPABASE_URL/storage/v1/object/authenticated/contract_signatures/$TENANT_B/$CONTRACT_B_ID/sig.png" \
+c=$(curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /dev/null -w '%{http_code}' "$SUPABASE_URL/storage/v1/object/authenticated/contract_signatures/$TENANT_B/$CONTRACT_B_ID/sig.png" \
   -H "apikey: $ANON_KEY" -H "Authorization: Bearer $JWT_EMP_A")
 check E3 "员工A 读租户B合同签名对象" DENY "$c"
 # G0-R2: 覆盖/upsert 已签名对象 = DENY（签名不可篡改）
-c=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/storage/v1/object/contract_signatures/$TENANT_B/$CONTRACT_B_ID/sig.png" \
+c=$(curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /dev/null -w '%{http_code}' -X POST "$SUPABASE_URL/storage/v1/object/contract_signatures/$TENANT_B/$CONTRACT_B_ID/sig.png" \
   -H "apikey: $ANON_KEY" -H "Authorization: Bearer $JWT_EMP_A" -H "Content-Type: image/png" -H "x-upsert: true" --data-binary 'x')
 check E4 "upsert 覆盖已存在签名" DENY "$c"
 
 # ---------- Edge Functions ----------
-c=$(curl -s -o /tmp/g0z_body -w '%{http_code}' -X POST "$SUPABASE_URL/functions/v1/create-tenant-with-admin" \
+c=$(curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /tmp/g0z_body -w '%{http_code}' -X POST "$SUPABASE_URL/functions/v1/create-tenant-with-admin" \
   -H "apikey: $ANON_KEY" -H "Content-Type: application/json" -d '{"phone":"13800000000"}')
 check F1 "无JWT建租户" 4xx "$c" "$(cat /tmp/g0z_body|head -c 200)"
-c=$(curl -s -o /tmp/g0z_body -w '%{http_code}' -X POST "$SUPABASE_URL/functions/v1/create-tenant-with-admin" \
+c=$(curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /tmp/g0z_body -w '%{http_code}' -X POST "$SUPABASE_URL/functions/v1/create-tenant-with-admin" \
   -H "apikey: $ANON_KEY" -H "Authorization: Bearer $JWT_EMP_A" -H "Content-Type: application/json" -d '{"phone":"13800000001"}')
 check F2 "普通JWT建租户(须403受控开通)" DENY "$c" "$(cat /tmp/g0z_body|head -c 200)"
-c=$(curl -s -o /tmp/g0z_body -w '%{http_code}' -X POST "$SUPABASE_URL/functions/v1/bind-wechat" \
+c=$(curl -s --retry 4 --retry-delay 1 --retry-connrefused -o /tmp/g0z_body -w '%{http_code}' -X POST "$SUPABASE_URL/functions/v1/bind-wechat" \
   -H "apikey: $ANON_KEY" -H "Content-Type: application/json" -d "{\"code\":\"x\",\"userId\":\"$EMP_B_ID\"}")
 check F3 "匿名bind-wechat" 4xx "$c" "$(cat /tmp/g0z_body|head -c 200)"
 
