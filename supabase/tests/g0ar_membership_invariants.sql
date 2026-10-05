@@ -7,6 +7,7 @@
 
 BEGIN;
 CREATE TEMP TABLE g0ar_results (test_id text PRIMARY KEY, status text, detail text);
+GRANT SELECT, INSERT, UPDATE, DELETE ON pg_temp.g0ar_results TO authenticated, anon, service_role;
 
 -- ---------- 夹具 ----------
 --（G0-Z-R2 后邀请码只能经 create_invitation 签发；过期/用尽码由 postgres 调造）
@@ -141,6 +142,7 @@ DO $$
 DECLARE r record; v_tenant uuid; v_used int; v_uses int;
 BEGIN
   SELECT * INTO r FROM public.join_tenant_with_code((SELECT valid_code FROM g0ar_tokens LIMIT 1), NULL, 'U');
+  PERFORM set_config('role','postgres', true);
 
   SELECT tenant_id INTO v_tenant FROM public.profiles
    WHERE id = '99999999-0000-0000-0000-000000000006';
@@ -161,6 +163,7 @@ EXCEPTION WHEN OTHERS THEN
 END $$;
 
 -- ============================================================
+SELECT set_config('role','authenticated', true);
 -- M8: Admin A 为租户 B 签发邀请码 = DENY（签发侧限本租户）
 -- ============================================================
 SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000002","role":"authenticated"}', true);

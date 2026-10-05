@@ -17,6 +17,7 @@ BEGIN;
 
 -- ---------- 夹具（固定 UUID，事务结束全部回滚） ----------
 CREATE TEMP TABLE g0_results (test_id text PRIMARY KEY, status text, detail text);
+GRANT SELECT, INSERT, UPDATE, DELETE ON pg_temp.g0_results TO authenticated, anon, service_role;
 
 INSERT INTO public.tenants (id, name, status) VALUES
   ('11111111-1111-1111-1111-111111111111', 'G0A-FIXTURE-TENANT-A', 'active'),
@@ -133,15 +134,13 @@ SELECT set_config('role','postgres', true);
 SELECT set_config('role','authenticated', true);
 SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000002","role":"authenticated"}', true);
 DO $$
-DECLARE v text;
+DECLARE r jsonb;
 BEGIN
-  UPDATE public.profiles SET role = 'store_manager'
-   WHERE id = '99999999-0000-0000-0000-000000000003'
-   RETURNING role::text INTO v;
-  IF v = 'store_manager' THEN
-    INSERT INTO g0_results VALUES ('T6','PASS','正常授权路径未被破坏');
+  SELECT public.admin_assign_member_role('99999999-0000-0000-0000-000000000003', 'store_manager') INTO r;
+  IF r->>'role' = 'store_manager' THEN
+    INSERT INTO g0_results VALUES ('T6','PASS','正常授权路径（RPC admin_assign_member_role）未被破坏');
   ELSE
-    INSERT INTO g0_results VALUES ('T6','FAIL','更新成功但返回异常: '||COALESCE(v,'null'));
+    INSERT INTO g0_results VALUES ('T6','FAIL','RPC 返回异常: '||COALESCE(r::text,'null'));
   END IF;
 EXCEPTION WHEN OTHERS THEN
   INSERT INTO g0_results VALUES ('T6','FAIL','正常授权路径被误伤: '||SQLERRM);
@@ -195,8 +194,13 @@ SELECT set_config('role','authenticated', true);
 SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000004","role":"authenticated"}', true);
 DO $$
 BEGIN
-  UPDATE public.profiles SET role = 'store_manager'
-   WHERE id = '99999999-0000-0000-0000-000000000003';  -- 租户A的员工
+  BEGIN
+    UPDATE public.profiles SET role = 'store_manager'
+     WHERE id = '99999999-0000-0000-0000-000000000003';  -- 租户A的员工
+  EXCEPTION WHEN insufficient_privilege THEN
+    INSERT INTO g0_results VALUES ('T9','PASS','跨租户/保护列更新被列级权限 DENY');
+    RETURN;
+  END;
   IF FOUND THEN
     INSERT INTO g0_results VALUES ('T9','FAIL','跨租户成员竟然可见/可改');
   ELSE
@@ -206,6 +210,7 @@ END $$;
 SELECT set_config('role','postgres', true);
 
 -- ============================================================
+SELECT set_config('request.jwt.claims', '{"sub":null}', true);
 -- T10 回归（应为真）：系统上下文（无JWT/SQL运维）不受守卫限制
 -- ============================================================
 DO $$

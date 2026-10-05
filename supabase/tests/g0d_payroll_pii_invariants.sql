@@ -7,6 +7,7 @@
 
 BEGIN;
 CREATE TEMP TABLE g0d_results (test_id text PRIMARY KEY, status text, detail text);
+GRANT SELECT, INSERT, UPDATE, DELETE ON pg_temp.g0d_results TO authenticated, anon, service_role;
 
 -- ---------- 夹具 ----------
 INSERT INTO public.tenants (id, name, status) VALUES
@@ -36,7 +37,7 @@ INSERT INTO public.candidates (tenant_id, name, phone)
 VALUES ('22222222-2222-2222-2222-222222222222', 'B店候选人', '13900000000');
 
 INSERT INTO public.employee_lifecycle_events (employee_id, event_type, event_date)
-VALUES ('55555555-0000-0000-0000-000000000002', 'onboarding', '2026-09-01');
+VALUES ('55555555-0000-0000-0000-000000000002', 'onboarded', '2026-09-01');
 
 -- ============================================================
 -- D1 宪法条款：A企业管理员读不到B企业工资（跨租户薪酬 DENY）

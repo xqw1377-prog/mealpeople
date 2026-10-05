@@ -8,6 +8,7 @@
 
 BEGIN;
 CREATE TEMP TABLE g0c_results (test_id text PRIMARY KEY, status text, detail text);
+GRANT SELECT, INSERT, UPDATE, DELETE ON pg_temp.g0c_results TO authenticated, anon, service_role;
 
 -- ---------- 夹具（postgres 身份插入，事务结束回滚） ----------
 INSERT INTO public.tenants (id, name, status) VALUES

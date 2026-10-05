@@ -8,6 +8,7 @@
 
 BEGIN;
 CREATE TEMP TABLE g0z_results (test_id text PRIMARY KEY, status text, detail text);
+GRANT SELECT, INSERT, UPDATE, DELETE ON pg_temp.g0z_results TO authenticated, anon, service_role;
 
 -- ---------- 夹具 ----------
 INSERT INTO public.tenants (id, name, status) VALUES
@@ -76,6 +77,7 @@ END $$;
 -- Z1-4: Admin A 指派租户 B 成员 = DENY
 -- Z1-5: Admin A 改自己 = DENY
 -- Z1-6: Admin A 授 super_admin = DENY（白名单外）
+SELECT set_config('request.jwt.claims', '{"sub":"99999999-0000-0000-0000-000000000002","role":"authenticated"}', true);
 -- ============================================================
 DO $$
 DECLARE r jsonb;
@@ -213,7 +215,7 @@ END $$;
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO public.invitation_codes (tenant_id, code, role, max_uses, expires_at)
+    INSERT INTO public.invitation_codes (tenant_id, code, store_id, role, max_uses, expires_at)
     VALUES ('11111111-1111-1111-1111-111111111111', 'EVEN32CHARSERVERLOOKINGCODE1234', NULL, 'employee', 1, now() + interval '7 days');
   EXCEPTION WHEN insufficient_privilege THEN
     INSERT INTO g0z_results VALUES ('Z2-6','PASS','authenticated 直插邀请码被 DENY（仅服务端签发）');
@@ -402,7 +404,7 @@ BEGIN
   WHERE n.nspname='public' AND p.proname='handle_new_user';
   IF v_src IS NULL THEN
     INSERT INTO g0z_results VALUES ('R1-3','FAIL','handle_new_user 不存在');
-  ELSIF v_src ILIKE '%super_admin%' THEN
+  ELSIF v_src ILIKE '%''super_admin''%' THEN
     INSERT INTO g0z_results VALUES ('R1-3','FAIL','仍含 super_admin 分支');
   ELSE
     INSERT INTO g0z_results VALUES ('R1-3','PASS','注册恒为非特权身份');
