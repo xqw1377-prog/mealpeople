@@ -10,6 +10,7 @@ import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
 import {useCallback, useState} from 'react'
+import {ErrorBanner, StatsStrip, TabHero} from '@/components/ds'
 import {getEmployeeByUserId} from '@/db/api'
 import type {Employee} from '@/db/types'
 import {useTenantStore} from '@/store/tenant'
@@ -139,6 +140,7 @@ const EmployeeWorkspace: React.FC = () => {
   const currentTenant = useTenantStore((state) => state.currentTenant)
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [firstLoading, setFirstLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
   const getGreeting = () => {
@@ -162,8 +164,10 @@ const EmployeeWorkspace: React.FC = () => {
     if (!user?.id) return
     try {
       setEmployee(await getEmployeeByUserId(user.id))
+      setLoadError(null)
     } catch (e) {
       console.error('加载员工信息失败:', e)
+      setLoadError('员工信息加载失败，请重试')
     } finally {
       setFirstLoading(false)
     }
@@ -207,54 +211,43 @@ const EmployeeWorkspace: React.FC = () => {
   return (
     <View className="min-h-screen bg-gray-50">
       <ScrollView scrollY className="h-screen box-border bg-transparent">
-        {/* 沉浸式品牌头 */}
-        <View className="relative overflow-hidden bg-primary-500 px-4 pt-12 pb-16">
-          <View className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-white/10" />
-          <View className="absolute top-8 right-20 w-20 h-20 rounded-full bg-white/5" />
-          <View className="relative flex items-start justify-between">
-            <View>
-              <View className="flex items-center">
-                <Text className="text-xl font-bold text-white">
-                  {getGreeting()}，{employee?.name || '同事'}
-                </Text>
-              </View>
-              <Text className="mt-1 text-xs text-white/75">
-                {getDateString()} · {currentTenant.name}
-              </Text>
-            </View>
+        {/* 沉浸式品牌头（DS） */}
+        <TabHero
+          title={`${getGreeting()}，${employee?.name || '同事'}`}
+          subtitle={`${getDateString()} · ${currentTenant.name}`}
+          right={
             <View className="flex items-center gap-1.5" onClick={handleRefresh}>
               <Text className={`i-mdi-refresh text-lg text-white/90 ${refreshing ? 'animate-spin' : ''}`} />
               <Text className="text-xs text-white/75">刷新</Text>
             </View>
-          </View>
-        </View>
+          }
+        />
+        {loadError && <ErrorBanner message={loadError} onRetry={loadEmployee} />}
 
-        {/* 今日概况条（叠加在 Hero 底沿；首载骨架） */}
-        <View className="px-4 -mt-10 relative z-10">
-          <View
-            className={`bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.06)] px-4 py-3.5 flex items-center ${firstLoading ? 'animate-pulse' : ''}`}>
-            <View className="flex-1 text-center">
-              <Text className="i-mdi-calendar-check-outline text-base text-primary-500" />
-              <Text className="block mt-1 text-xs text-gray-400">今日班次</Text>
-              <Text className="text-sm font-semibold text-gray-900">待查询</Text>
-            </View>
-            <View className="w-px h-8 bg-gray-100" />
-            <View className="flex-1 text-center">
-              <Text className="i-mdi-clock-fast text-base text-success-500" />
-              <Text className="block mt-1 text-xs text-gray-400">打卡状态</Text>
-              <Text className="text-sm font-semibold text-gray-900">未打卡</Text>
-            </View>
-            <View className="w-px h-8 bg-gray-100" />
-            <View
-              className="flex-1 text-center"
-              onClick={() => Taro.navigateTo({url: '/pages/quick-start/index'})}
-              hoverClass="opacity-70">
-              <Text className="i-mdi-rocket-launch-outline text-base text-warning-500" />
-              <Text className="block mt-1 text-xs text-gray-400">新手引导</Text>
-              <Text className="text-sm font-semibold text-primary-600">去开始</Text>
-            </View>
-          </View>
-        </View>
+        {/* 今日概况条（DS；首载骨架） */}
+        <StatsStrip
+          className={firstLoading ? 'animate-pulse' : ''}
+          items={[
+            {
+              value: '待查询',
+              label: '今日班次',
+              valueClass: 'text-sm font-semibold',
+              onClick: () => Taro.navigateTo({url: '/packageB/pages/scheduling/index'})
+            },
+            {
+              value: '未打卡',
+              label: '打卡状态',
+              valueClass: 'text-sm font-semibold',
+              onClick: () => Taro.navigateTo({url: '/packageG/pages/working/attendance/index'})
+            },
+            {
+              value: '去开始',
+              label: '新手引导',
+              valueClass: 'text-sm font-semibold text-primary-600',
+              onClick: () => Taro.navigateTo({url: '/pages/quick-start/index'})
+            }
+          ]}
+        />
 
         {/* 常用功能 */}
         <View className="mx-4 mt-4 bg-white rounded-2xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">

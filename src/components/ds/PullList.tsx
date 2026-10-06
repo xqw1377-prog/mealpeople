@@ -52,6 +52,12 @@ export function PullList<T>(props: PullListProps<T>) {
   const [firstLoaded, setFirstLoaded] = useState(false)
   const [finished, setFinished] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  /**
+   * P1-C Gate4：独立 error 态。
+   * - 首屏失败 → error=true → 渲染错误视图（带重试），绝不落入空态
+   * - 翻页失败 → 列表保留，toast 提示（error 保持 false，避免已加载内容被错误视图顶掉）
+   */
+  const [error, setError] = useState<string | null>(null)
   const reqId = useRef(0)
 
   const load = useCallback(
@@ -66,9 +72,18 @@ export function PullList<T>(props: PullListProps<T>) {
         setFinished(done)
         setItems((prev) => (isRefresh ? rows : [...prev, ...rows]))
         setPage(targetPage)
-      } catch (e) {
+        setError(null)
+      } catch (e: any) {
+        if (id !== reqId.current) return
         console.error('[PullList] 加载失败', e)
-        Taro.showToast({title: '加载失败，请重试', icon: 'none'})
+        const msg = e?.message || '加载失败，请检查网络'
+        if (isRefresh) {
+          // 首屏/刷新失败：进入可见错误态（而非空态）
+          setError(msg)
+        } else {
+          // 翻页失败：保留已有内容，轻提示
+          Taro.showToast({title: '加载更多失败，请重试', icon: 'none'})
+        }
       } finally {
         if (id === reqId.current) {
           setRefreshing(false)
@@ -103,8 +118,24 @@ export function PullList<T>(props: PullListProps<T>) {
     )
   }
 
-  // 空态
-  if (firstLoaded && items.length === 0) {
+  // 错误态（首屏失败）：可见错误 + 重试，绝不落入空态（P1-C Gate4）
+  if (firstLoaded && error !== null) {
+    return (
+      <View className="flex flex-col items-center justify-center py-24 px-8">
+        <Text className="i-mdi-cloud-alert-outline text-5xl text-gray-300" />
+        <Text className="mt-4 text-sm text-gray-500">{error}</Text>
+        <View
+          className="mt-6 px-8 py-2.5 rounded-full bg-primary-500 text-white text-sm font-medium"
+          hoverClass="opacity-80"
+          onClick={() => load(1, true)}>
+          重新加载
+        </View>
+      </View>
+    )
+  }
+
+  // 空态（仅当确实无错误且无数据）
+  if (firstLoaded && items.length === 0 && error === null) {
     return (
       <View className="flex flex-col items-center justify-center py-24 px-8">
         <Text className={`${emptyIcon} text-5xl text-gray-300`} />

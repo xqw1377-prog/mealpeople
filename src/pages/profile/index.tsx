@@ -9,6 +9,7 @@ import {ScrollView, Text, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import {useCallback, useState} from 'react'
+import {ErrorBanner, TabHero} from '@/components/ds'
 import {getCurrentUser, getEmployeeByUserId} from '@/db/api'
 import type {Employee, Profile as UserProfile} from '@/db/types'
 import {useTenantStore} from '@/store/tenant'
@@ -72,6 +73,7 @@ export default function Profile() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const loadData = useCallback(async () => {
     if (!user?.id) return
@@ -81,6 +83,7 @@ export default function Profile() {
       setEmployee(e)
     } catch (e) {
       console.error('加载用户数据失败:', e)
+      setLoadError('用户数据加载失败，请重试')
     } finally {
       setLoading(false)
     }
@@ -109,10 +112,9 @@ export default function Profile() {
   return (
     <View className="min-h-screen bg-gray-50">
       <ScrollView scrollY className="h-screen box-border">
-        {/* 用户 Hero */}
-        <View className="relative overflow-hidden bg-primary-500 px-4 pt-10 pb-16">
-          <View className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-white/10" />
-          <View className="relative flex items-center">
+        {/* 用户 Hero（DS） */}
+        <TabHero title="我的" subtitle="账号与设置">
+          <View className="relative flex items-center mt-4">
             {loading ? (
               <View className="w-16 h-16 rounded-2xl bg-white/25 animate-pulse" />
             ) : (
@@ -141,16 +143,15 @@ export default function Profile() {
                 )}
               </View>
             </View>
-            <View className="flex flex-col gap-2">
-              <View
-                className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center"
-                hoverClass="opacity-60"
-                onClick={() => Taro.navigateTo({url: '/pages/settings/index'})}>
-                <Text className="i-mdi-cog-outline text-lg text-white" />
-              </View>
+            <View
+              className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center"
+              hoverClass="opacity-60"
+              onClick={() => Taro.navigateTo({url: '/pages/settings/index'})}>
+              <Text className="i-mdi-cog-outline text-lg text-white" />
             </View>
           </View>
-        </View>
+        </TabHero>
+        {loadError && <ErrorBanner message={loadError} onRetry={loadData} />}
 
         {/* 管理功能（isAdmin，路由 parity 全保留） */}
         {isAdmin && (

@@ -8,6 +8,7 @@ import {ScrollView, Text, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import {useCallback, useState} from 'react'
+import {ErrorBanner, StatsStrip, TabHero} from '@/components/ds'
 import {getEmployeeByUserId} from '@/db/api'
 import {getEmployeeGrowthData} from '@/db/api-growth'
 import type {GrowthData} from '@/db/types-growth'
@@ -123,18 +124,15 @@ export default function MyGrowth() {
   return (
     <View className="min-h-screen bg-gray-50">
       <ScrollView scrollY className="h-screen box-border">
-        {/* 等级 Hero */}
-        <View className="relative overflow-hidden bg-primary-500 px-4 pt-10 pb-16">
-          <View className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-white/10" />
-          <View className="relative flex items-center justify-between">
-            <View>
-              <Text className="text-xs text-white/75">当前等级</Text>
-              <Text className="mt-1 text-2xl font-bold text-white">{level.current_level}</Text>
-            </View>
+        {/* 等级 Hero（DS） */}
+        <TabHero
+          title={level.current_level}
+          subtitle={`距 ${level.next_level} 还需 ${level.next_level_score - level.level_score} 积分`}
+          right={
             <View className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center">
               <Text className="i-mdi-star-four-points-outline text-3xl text-white" />
             </View>
-          </View>
+          }>
           <View className="relative mt-4">
             <View className="flex items-center justify-between mb-1.5">
               <Text className="text-2xs text-white/75">等级积分</Text>
@@ -145,49 +143,36 @@ export default function MyGrowth() {
             <View className="h-1.5 bg-white/25 rounded-full overflow-hidden">
               <View className="h-full bg-white rounded-full" style={{width: `${levelPct}%`}} />
             </View>
-            <Text className="mt-1.5 text-2xs text-white/70">
-              距 {level.next_level} 还需 {level.next_level_score - level.level_score} 积分
-            </Text>
           </View>
-        </View>
+        </TabHero>
 
-        {/* 学习进度统计条 */}
-        <View className="px-4 -mt-9 relative z-10">
-          <View className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.06)] py-4 px-2">
-            <View className="grid grid-cols-3">
-              <View className="text-center">
-                <Text className="text-xl font-bold text-gray-900">{learning_progress.total_courses}</Text>
-                <Text className="block mt-0.5 text-2xs text-gray-400">总课程</Text>
-              </View>
-              <View className="text-center border-l border-r border-gray-100">
-                <Text className="text-xl font-bold text-success-600">{learning_progress.completed_courses}</Text>
-                <Text className="block mt-0.5 text-2xs text-gray-400">已完成</Text>
-              </View>
-              <View className="text-center">
-                <Text className="text-xl font-bold text-info-600">{learning_progress.in_progress_courses}</Text>
-                <Text className="block mt-0.5 text-2xs text-gray-400">学习中</Text>
-              </View>
+        {/* 学习进度统计条（DS） */}
+        <StatsStrip
+          items={[
+            {value: learning_progress.total_courses, label: '总课程'},
+            {value: learning_progress.completed_courses, label: '已完成', valueClass: 'text-success-600'},
+            {value: learning_progress.in_progress_courses, label: '学习中', valueClass: 'text-info-600'}
+          ]}
+        />
+        <View className="bg-white rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.06)] mt-3 mx-4 py-4">
+          <View className="px-4">
+            <View className="flex items-center justify-between mb-1.5">
+              <Text className="text-2xs text-gray-400">完成率</Text>
+              <Text className="text-2xs font-medium text-primary-600">{learning_progress.completion_rate}%</Text>
             </View>
-            <View className="mt-3 px-4">
-              <View className="flex items-center justify-between mb-1.5">
-                <Text className="text-2xs text-gray-400">完成率</Text>
-                <Text className="text-2xs font-medium text-primary-600">{learning_progress.completion_rate}%</Text>
-              </View>
-              <View className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                <View
-                  className="h-full bg-primary-500 rounded-full"
-                  style={{width: `${learning_progress.completion_rate}%`}}
-                />
-              </View>
-              <View className="mt-2.5 flex items-center gap-4">
-                <Text className="text-2xs text-gray-400">
-                  学习时长{' '}
-                  <Text className="font-semibold text-gray-700">{learning_progress.total_learning_hours}h</Text>
-                </Text>
-                <Text className="text-2xs text-gray-400">
-                  平均分 <Text className="font-semibold text-gray-700">{learning_progress.average_score}</Text>
-                </Text>
-              </View>
+            <View className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <View
+                className="h-full bg-primary-500 rounded-full"
+                style={{width: `${learning_progress.completion_rate}%`}}
+              />
+            </View>
+            <View className="mt-2.5 flex items-center gap-4">
+              <Text className="text-2xs text-gray-400">
+                学习时长 <Text className="font-semibold text-gray-700">{learning_progress.total_learning_hours}h</Text>
+              </Text>
+              <Text className="text-2xs text-gray-400">
+                平均分 <Text className="font-semibold text-gray-700">{learning_progress.average_score}</Text>
+              </Text>
             </View>
           </View>
         </View>
