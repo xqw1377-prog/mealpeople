@@ -21,6 +21,12 @@ console.log('🔧 Supabase 配置:', {
 
 let noticed = false
 export const customFetch: typeof fetch = async (url: string, options: RequestInit) => {
+  // H5 运行时按需打包不含 Taro.request（调用会抛 "_.request is not a function"），
+  // 浏览器环境直接走原生 fetch；小程序端保持 Taro.request 适配不变
+  if (process.env.TARO_ENV === 'h5') {
+    return fetch(url, options)
+  }
+
   let headers: HeadersInit = options.headers || {}
   const {method = 'GET', body} = options
 
