@@ -13,7 +13,7 @@ import type React from 'react'
 import {useCallback, useEffect, useRef, useState} from 'react'
 import {supabase} from '@/client/supabase'
 import Drawer from '@/components/Drawer'
-import {PullList, StatsStrip, TabHero} from '@/components/ds'
+import {ErrorBanner, PullList, StatsStrip, TabHero} from '@/components/ds'
 import type {WorkRecord} from '@/components/WorkLog'
 import {AddRecordForm, RecordDetail} from '@/components/WorkLog'
 import {getEmployeeByUserId} from '@/db/api'
@@ -48,6 +48,8 @@ const WorkLog: React.FC = () => {
   const currentTenant = useTenantStore((state) => state.currentTenant)
 
   const [employee, setEmployee] = useState<Employee | null>(null)
+  const [baseLoading, setBaseLoading] = useState(true)
+  const [baseError, setBaseError] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [stats, setStats] = useState({today: 0, week: 0, month: 0})
   const [statsLoading, setStatsLoading] = useState(true)
@@ -57,24 +59,29 @@ const WorkLog: React.FC = () => {
   const [drawerType, setDrawerType] = useState<'add' | 'detail' | null>(null)
   const [selected, setSelected] = useState<WorkRecord | null>(null)
 
-  // P1-1：统计独立 count 查询（head-only 真实数量）
+  // P1-D：统计独立 count 查询（显式检查 Supabase error；自然周/自然月口径）
   const loadStats = useCallback(
     async (empId: string) => {
       if (!currentTenant) return
       setStatsLoading(true)
       try {
         const now = new Date()
-        const dayStart = (offsetDays: number) =>
-          new Date(now.getFullYear(), now.getMonth(), now.getDate() - offsetDays).toISOString()
-        const q = (gte: string) =>
-          supabase
+        // 今日=今天00:00；本周=本周一00:00；本月=本月1日00:00（自然口径）
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+        const weekStart = new Date(todayStart)
+        weekStart.setDate(weekStart.getDate() - ((now.getDay() + 6) % 7)) // 周一
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+        const q = async (gte: Date) => {
+          const {count, error} = await supabase
             .from('work_records')
             .select('id', {count: 'exact', head: true})
             .eq('tenant_id', currentTenant.id)
             .eq('employee_id', empId)
-            .gte('created_at', gte)
-            .then((r) => r.count ?? 0)
-        const [today, week, month] = await Promise.all([q(dayStart(0)), q(dayStart(6)), q(dayStart(29))])
+            .gte('created_at', gte.toISOString())
+          if (error) throw error
+          return count ?? 0
+        }
+        const [today, week, month] = await Promise.all([q(todayStart), q(weekStart), q(monthStart)])
         setStats({today, week, month})
       } catch (e) {
         console.error('统计查询失败:', e)
@@ -87,21 +94,31 @@ const WorkLog: React.FC = () => {
   )
 
   const loadBase = useCallback(async () => {
-    if (!user || !currentTenant) return
+    if (!user || !currentTenant) {
+      setBaseLoading(false)
+      return
+    }
+    setBaseLoading(true)
+    setBaseError(null)
     try {
       const emp = await getEmployeeByUserId(user.id)
-      if (!emp) return
-      setEmployee(emp)
-      if (empRef.current !== emp.id) {
-        empRef.current = emp.id
+      setEmployee(emp || null) // null = 无员工档案（真实 Empty，非骨架）
+      if (emp) {
+        if (empRef.current !== emp.id) empRef.current = emp.id
         loadStats(emp.id)
-      } else {
-        loadStats(emp.id) // 每次进入刷新统计
       }
-      const {data: profile} = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+      const {data: profile, error: roleError} = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (roleError) throw roleError
       setIsAdmin(profile?.role === 'admin' || profile?.role === 'tenant_admin' || profile?.role === 'super_admin')
     } catch (e) {
       console.error('加载基础信息失败:', e)
+      setBaseError('基础信息加载失败，请重试')
+    } finally {
+      setBaseLoading(false)
     }
   }, [user, currentTenant, loadStats])
 
@@ -159,7 +176,7 @@ const WorkLog: React.FC = () => {
   const statVal = (n: number) => (statsLoading ? '…' : n < 0 ? '-' : String(n))
 
   return (
-    <View className="min-h-screen bg-gray-50 flex flex-col">
+    <View className="h-screen overflow-hidden bg-gray-50 flex flex-col">
       {/* 品牌头（DS）+ 统计条（DS，真实 count） */}
       <TabHero
         title="工作记录"
@@ -191,15 +208,35 @@ const WorkLog: React.FC = () => {
         </View>
       )}
 
-      {/* 列表：PullList 独占剩余高度（flex-1），不再嵌套外层纵向 ScrollView */}
-      {!employee ? (
+      {/* 主体：baseLoading 骨架 / baseError / 无租户引导 / 无档案 Empty / PullList(flex-1 min-h-0) */}
+      {baseLoading ? (
         <View className="px-4 mt-3">
           {[0, 1, 2].map((i) => (
             <View key={i} className="mb-3 h-24 rounded-2xl bg-gray-100 animate-pulse" />
           ))}
         </View>
+      ) : baseError ? (
+        <ErrorBanner message={baseError} onRetry={loadBase} />
+      ) : !currentTenant ? (
+        <View className="flex-1 flex flex-col items-center justify-center px-8">
+          <Text className="i-mdi-office-building-outline text-5xl text-gray-300" />
+          <Text className="mt-4 text-sm font-semibold text-gray-700">请先选择企业</Text>
+          <Text className="mt-1 text-xs text-gray-400">工作记录需要在企业上下文中使用</Text>
+          <View
+            className="mt-6 px-8 py-2.5 rounded-full bg-primary-500 text-white text-sm"
+            hoverClass="opacity-80"
+            onClick={() => Taro.navigateTo({url: '/pages/tenant-select/index'})}>
+            选择企业
+          </View>
+        </View>
+      ) : !employee ? (
+        <View className="flex-1 flex flex-col items-center justify-center px-8">
+          <Text className="i-mdi-account-off-outline text-5xl text-gray-300" />
+          <Text className="mt-4 text-sm font-semibold text-gray-700">暂无员工档案</Text>
+          <Text className="mt-1 text-xs text-gray-400">请联系管理员将您添加为员工后再使用工作记录</Text>
+        </View>
       ) : (
-        <View className="flex-1 mt-3 min-h-0">
+        <View className="flex-1 min-h-0 mt-3">
           <PullList<WorkRecord>
             key={listKey}
             fetchPage={fetchPage}

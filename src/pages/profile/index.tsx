@@ -77,6 +77,7 @@ export default function Profile() {
 
   const loadData = useCallback(async () => {
     if (!user?.id) return
+    setLoadError(null)
     try {
       const [p, e] = await Promise.all([getCurrentUser(), getEmployeeByUserId(user.id)])
       setProfile(p)

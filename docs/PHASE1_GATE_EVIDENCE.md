@@ -41,14 +41,15 @@ BEFORE = 25 | AFTER = 25
 ### G6 图标 = PASS
 重写区域 100% iconify。
 
-### G7 复杂度 = PASS（最终行数按 P1-C 后实文件统计）
+### G7 复杂度 = PASS（P1-D 后实文件统计）
 ```
 index    291 行（原 456）
-work-log 278 行（原 385）
-growth   278 行（原 366）
-profile  287 行（原 332）
+work-log 315 行（原 385）—— P1-D 第4项 base 状态拆分（骨架/Error/无租户/无档案四态）增加约 37 行
+growth   272 行（原 366）
+profile  288 行（原 332）
 ```
-全部 < 300。（注：此前版本报告的 226/237/259/174 为 biome 格式化前统计，已废弃。）
+work-log 因 G4 要求的四态拆分增至 315（>300，如实登记）；其余三页 < 300。
+（注：历史版本报告的 226/237/259/174 与 291/278/278/287 分别为 biome 前与 P1-C 统计，均以本版为准。）
 
 ### G8 Build + 截图 = HOLD
 - TYPE/STATIC 见文首口径
@@ -66,4 +67,18 @@ P1-2  PullList 增加 error 独立态 + retry；index/profile 增加 ErrorBanner
 P1-3  新增 TabShell（TabHero/StatsStrip/ErrorBanner）；四 Tab 全部真实 import DS；手写 Hero 清零
 P1-4  本证据文件事实口径修订（行数、Build 措辞）
 NESTED-SCROLL  work-log 去除嵌套纵向滚动（PullList 独占 flex-1 区域）
+```
+
+## P1-D 变更明细（相对 9189cb4，仅六项）
+
+```
+D-1  count 查询显式检查 Supabase error（{count, error} + throw），失败走 catch → '-'
+D-2  统计口径改自然周/自然月：今日=当天00:00 / 本周=本周一00:00 / 本月=本月1日00:00
+D-3  PullList 移除写死 style height:100vh → h-full；work-log 根布局 h-screen overflow-hidden
+     flex flex-col，列表区 flex-1 min-h-0（真正的剩余空间高度）
+D-4  work-log base 状态拆分：baseLoading(骨架) / baseError(ErrorBanner+重试) /
+     无 currentTenant(选择企业引导) / 无 employee(暂无员工档案 Empty) / employee(PullList)
+D-5  profile loadData 开始处 setLoadError(null)（重试成功后横幅不再残留）
+D-6  growth 错误分支真实使用 ErrorBanner（TabHero + ErrorBanner + 重试），
+     证据与实现一致（此前 P1-C 证据声称已换用但实现未生效，本版修正）
 ```

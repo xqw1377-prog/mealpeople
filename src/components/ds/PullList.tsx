@@ -155,8 +155,7 @@ export function PullList<T>(props: PullListProps<T>) {
   return (
     <ScrollView
       scrollY
-      className={className}
-      style={{height: '100vh'}}
+      className={`h-full ${className}`}
       refresherEnabled
       refresherTriggered={refreshing}
       onRefresherRefresh={onRefresh}

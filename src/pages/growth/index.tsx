@@ -86,15 +86,9 @@ export default function MyGrowth() {
   // ---- Error：重试 ----
   if (error) {
     return (
-      <View className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-8">
-        <Text className="i-mdi-cloud-alert-outline text-5xl text-gray-300" />
-        <Text className="mt-4 text-sm text-gray-500">{error}</Text>
-        <View
-          className="mt-6 px-8 py-2.5 rounded-full bg-primary-500 text-white text-sm"
-          hoverClass="opacity-80"
-          onClick={load}>
-          重新加载
-        </View>
+      <View className="min-h-screen bg-gray-50">
+        <TabHero title="我的成长" subtitle="培训发展与职业成长" />
+        <ErrorBanner message={error} onRetry={load} />
       </View>
     )
   }
