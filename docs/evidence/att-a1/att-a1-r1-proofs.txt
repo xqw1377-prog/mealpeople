@@ -1,0 +1,9 @@
+  ACL: [{"proname":"att_guard_immutable_snapshot","anon_e":false,"auth_e":false,"svc_e":false,"pub_e":false},{"proname":"att_guard_schedule_freeze","anon_e":false,"auth_e":false,"svc_e":false,"pub_e":false}]
+  PASS  R1-1  authenticated/service_role/anon/PUBLIC EXECUTE att_guard_* = false
+  PASS  R1-2  Advisor att_guard_* findings = 0
+  PASS  R1-3  attendance 存在 → schedule 物理 DELETE → DENY（schedule/attendance 均留存）
+  PASS  R1-4  已开考班语义字段 UPDATE 仍 FROZEN；notes 仍 ALLOW
+  PASS  R1-6  terminal = attendance 0 · schedules 301 legacy · schedule 通知 0
+  00140: dropTable=1 updatedTrigger=true regexTz=true restrict=true guardRevoke=true
+  PASS  R1-5  00140 canonical：无重复块/孤立片段；含 updated_at trigger；约束/FK/ACL 与 live 一致
+结果: PASS=6 FAIL=0
