@@ -1,0 +1,32 @@
+=== F1 timezone ===
+  PASS  F1-1  存量门店全部 Asia/Shanghai
+  PASS  F1-2  NULL timezone → DENY（NOT NULL）
+  PASS  F1-3  invalid IANA 'Not/AZone!' → DENY
+  PASS  F1-4  valid IANA 'Asia/Tokyo' → ALLOW
+=== F2 cardinality ===
+  PASS  F2-1  同员工同 business_date + 两个不同 schedule_id → 2 行 ALLOW（schema 级）
+  PASS  F2-2  同一 schedule_id 第二次 → DENY（UNIQUE(schedule_id)）
+=== F3 direct writes（authenticated 全角色） ===
+  PASS  F3-1  employee INSERT → DENY
+  PASS  F3-2  employee UPDATE → 0 行（无 policy）
+  PASS  F3-3  employee DELETE → 0 行
+  PASS  F3-4  tenant_admin INSERT → DENY
+  PASS  F3-5  tenant_admin UPDATE → 0 行
+=== F4 SELECT 权威矩阵 ===
+  PASS  F4-1  employee SELECT 自己 2 条 → ALLOW；他人（empB 绑定行若在）不可见
+  PASS  F4-2  tenant_admin(A) SELECT 本租户 → ALLOW
+  PASS  F4-3  tenant_admin(B) SELECT 租户A attendance → 0 行
+=== F5 immutable snapshot（含 service 层 trigger 兜底） ===
+  PASS  F5-1  planned_start_at 篡改 → DENY（A4 trigger，含 service）
+  PASS  F5-2  employee_id 篡改 → DENY
+=== F6 schedule freeze guard ===
+  PASS  F6-1  已开考班改 start_time → DENY
+  PASS  F6-2  已开考班 cancel（status 改写）→ DENY
+  PASS  F6-3  已开考班换员工 → DENY
+  PASS  F6-4  已开考班改 notes → ALLOW
+  PASS  F6-5  未开考班 notes/时间均可改（guard 仅限已开考）
+  PASS  F6-6  cancel_schedule command 对已开考班 → DENY（trigger 兜底 RPC）
+=== F7 terminal ===
+  PASS  F7-1  work_attendance = 0 行（测试数据零残留）
+  PASS  F7-2  schedules = 301 legacy 不变
+结果: PASS=24 FAIL=0
