@@ -1,0 +1,14 @@
+  PASS  C1  本人 published 工作班 clock-in → identity/snapshot 全正确
+  PASS  C2  他人班次 clock-in → DENY
+  PASS  C3  legacy 班 / day-off 班 clock-in → 均 DENY
+  PASS  C3b  cancelled 班 clock-in → DENY
+  PASS  C4  同日两段班分别 clock-in → 2 条事实
+  PASS  C5  并发 clock-in 同一 schedule → exactly one COMMIT · one DENY · 1 fact
+  PASS  C9  跨午夜 22:00–02:00 → business_date=原日 · planned 区间正确（end>start）
+  PASS  C6  无考勤事实的 clock-out → DENY
+  PASS  C7  合法 clock-out → server clock_out_at + work_hours 服务端派生
+  PASS  C8  重复 clock-out → DENY · 事实未变
+  PASS  C10  直写 INSERT → 403；UPDATE → 0 行
+  PASS  C11  开考后 UPDATE→FROZEN · cancel→FROZEN · DELETE→RESTRICT
+  PASS  C12  terminal = attendance 0 · 301 legacy · 通知 0
+结果: PASS=13 FAIL=0
