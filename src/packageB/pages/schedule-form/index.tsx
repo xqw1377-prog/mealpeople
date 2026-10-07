@@ -14,7 +14,7 @@ import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
 import {useCallback, useEffect, useState} from 'react'
 import {supabase} from '@/client/supabase'
-import {Field, TabHero} from '@/components/ds'
+import {ErrorBanner, Field, TabHero} from '@/components/ds'
 import {getEmployeesByStoreId, getScheduleById, getStoresByTenantId} from '@/db/api'
 import type {Employee, Store} from '@/db/types'
 import {useTenantStore} from '@/store/tenant'
@@ -50,6 +50,8 @@ const ScheduleForm: React.FC = () => {
   const [fieldErrors, setFieldErrors] = useState<{date?: string; time?: string; employee?: string}>({})
   const [submitting, setSubmitting] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [editEmployeeName, setEditEmployeeName] = useState('')
 
   const [editId, setEditId] = useState('')
   const isEdit = !!editId
@@ -57,7 +59,12 @@ const ScheduleForm: React.FC = () => {
   const params = getCurrentInstance().router?.params
 
   const loadStores = useCallback(async () => {
-    if (!currentTenant) return
+    if (!currentTenant) {
+      setInitialLoading(false)
+      return
+    }
+    setInitialLoading(true)
+    setLoadError(null)
     try {
       const storesData = await getStoresByTenantId(currentTenant.id)
       setStores(storesData)
@@ -67,18 +74,24 @@ const ScheduleForm: React.FC = () => {
       }
     } catch (e) {
       console.error('加载门店失败:', e)
-      setLoadError('门店/员工加载失败，请返回重试')
+      setLoadError('门店/员工加载失败，请重试')
+    } finally {
+      setInitialLoading(false)
     }
   }, [currentTenant])
 
-  // 编辑模式：载入既有 published 班次（仅内容字段可改）
+  // 编辑模式：载入既有 published 班次（仅内容字段可改；员工身份锁定展示）
   const loadSchedule = useCallback(async (id: string) => {
+    setInitialLoading(true)
+    setLoadError(null)
     try {
       const s = await getScheduleById(id)
       if (!s || s.status !== 'published') {
         setLoadError('班次不存在或不可编辑（仅已发布班次可修改）')
         return
       }
+      const empEmbed = (s as unknown as {employees?: {name?: string} | {name?: string}[]}).employees
+      setEditEmployeeName((Array.isArray(empEmbed) ? empEmbed[0]?.name : empEmbed?.name) || '该员工')
       setDate(String(s.schedule_date).slice(0, 10))
       setIsDayOff(!!s.is_day_off)
       setStartTime(s.start_time ? String(s.start_time).slice(0, 5) : '')
@@ -88,7 +101,9 @@ const ScheduleForm: React.FC = () => {
       setNotes(s.notes || '')
     } catch (e) {
       console.error('加载班次失败:', e)
-      setLoadError('班次加载失败，请返回重试')
+      setLoadError('班次加载失败，请重试')
+    } finally {
+      setInitialLoading(false)
     }
   }, [])
 
@@ -134,13 +149,14 @@ const ScheduleForm: React.FC = () => {
 
   const validate = (): boolean => {
     const errs: typeof fieldErrors = {}
-    if (!isDayOff && !date) errs.date = '请选择日期'
-    if (isDayOff) {
-      // 排休只需日期 + 餐段
-    } else if (!startTime || !endTime) {
-      errs.time = '请选择开始与结束时间'
-    } else if (startTime === endTime) {
-      errs.time = '起止时间不得相等'
+    // 日期无条件必填（工作班与排休都是"哪一天"的事实）
+    if (!date) errs.date = '请选择日期'
+    if (!isDayOff) {
+      if (!startTime || !endTime) {
+        errs.time = '请选择开始与结束时间'
+      } else if (startTime === endTime) {
+        errs.time = '起止时间不得相等'
+      }
     }
     if (!isEdit && employees.length === 0) errs.employee = '该门店暂无在职员工'
     setFieldErrors(errs)
@@ -196,14 +212,38 @@ const ScheduleForm: React.FC = () => {
     <View className="min-h-screen bg-gray-50">
       <TabHero title={isEdit ? '修改排班' : '创建排班'} subtitle="发布即为员工可见的正式班次" />
       <View className="px-4 pb-8 -mt-9">
-        {loadError ? (
-          <View className="bg-white rounded-2xl shadow-sm p-5">
-            <Text className="text-sm text-danger-600">{loadError}</Text>
+        {initialLoading ? (
+          <View className="bg-white rounded-2xl shadow-sm p-5 space-y-3">
+            <View className="h-5 w-28 rounded bg-gray-100 animate-pulse" />
+            <View className="h-11 rounded-xl bg-gray-100 animate-pulse" />
+            <View className="h-5 w-20 rounded bg-gray-100 animate-pulse" />
+            <View className="h-11 rounded-xl bg-gray-100 animate-pulse" />
+            <View className="h-11 rounded-xl bg-gray-100 animate-pulse" />
+          </View>
+        ) : loadError ? (
+          <ErrorBanner message={loadError} onRetry={() => (isEdit ? loadSchedule(editId) : loadStores())} />
+        ) : !isEdit && stores.length === 0 ? (
+          <View className="bg-white rounded-2xl shadow-sm py-10 flex flex-col items-center">
+            <View className="i-mdi-store-off-outline text-5xl text-gray-200" />
+            <Text className="mt-2 text-sm text-gray-400">当前租户暂无门店</Text>
+            <Text className="mt-1 text-xs text-gray-300">请先创建门店后再为员工排班</Text>
           </View>
         ) : (
           <>
             {/* 谁 */}
-            {!isEdit && (
+            {isEdit ? (
+              <View className="bg-white rounded-2xl shadow-sm p-4 mb-3">
+                <Field label="谁在上班" required>
+                  <View className="w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-gray-50 flex items-center justify-between">
+                    <Text className="text-sm text-gray-800">{editEmployeeName}</Text>
+                    <View className="flex items-center gap-1">
+                      <View className="i-mdi-lock-outline text-sm text-gray-400" />
+                      <Text className="text-2xs text-gray-400">不可修改</Text>
+                    </View>
+                  </View>
+                </Field>
+              </View>
+            ) : (
               <View className="bg-white rounded-2xl shadow-sm p-4 mb-3">
                 <Field label="谁在上班" required error={fieldErrors.employee}>
                   <Picker
@@ -232,6 +272,12 @@ const ScheduleForm: React.FC = () => {
                     </View>
                   </Picker>
                 </Field>
+                {stores.length > 0 && employees.length === 0 && (
+                  <View className="mt-2 flex items-start gap-1.5 bg-warning-50 rounded-lg p-2.5">
+                    <View className="i-mdi-account-off-outline text-sm text-warning-600 mt-0.5" />
+                    <Text className="text-xs text-warning-700 flex-1">该门店暂无在职员工，请先在员工管理中添加</Text>
+                  </View>
+                )}
               </View>
             )}
 
@@ -351,7 +397,8 @@ const ScheduleForm: React.FC = () => {
             <View className="bg-primary-50 rounded-2xl p-4 mb-3 flex items-center gap-2">
               <View className="i-mdi-bullhorn-outline text-lg text-primary-500" />
               <Text className="text-xs text-gray-600 flex-1">
-                即将{isEdit ? '修改' : '发布'}：{employees[employeeIndex]?.name || '员工'} · {summaryLine}
+                即将{isEdit ? '修改' : '发布'}：{isEdit ? editEmployeeName : employees[employeeIndex]?.name || '员工'} ·{' '}
+                {summaryLine}
               </Text>
             </View>
             <View className="flex gap-3">
