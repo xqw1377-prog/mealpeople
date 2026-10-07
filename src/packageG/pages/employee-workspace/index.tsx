@@ -66,7 +66,7 @@ const EmployeeWorkspace: React.FC = () => {
   // 导航到我的排班
   const handleMySchedule = () => {
     Taro.navigateTo({
-      url: '/packageG/pages/my-schedule/index'
+      url: '/packageB/pages/scheduling/index'
     })
   }
 

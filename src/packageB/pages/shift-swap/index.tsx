@@ -1,103 +1,97 @@
 /**
  * 换班申请页面
+ * P2-S1-A cutover：候选班次与提交全部走 schedules 真实数据 + command RPC。
+ * - 我的班次：本人 schedules published（RLS 隔离 legacy/他人）
+ * - 目标班次：同门店其他同事的 published 班次（schedules_select_store_published）
+ * - 提交：request_schedule_swap（服务端校验同店/在职/pending 重复，错误原因透出）
  */
 
 import {Button, ScrollView, Text, Textarea, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import {useCallback, useState} from 'react'
-import {getEmployeeByUserId} from '@/db/api-employees'
-import {getEmployeeWeekShifts} from '@/db/api-shifts'
-import {createSwapRequest} from '@/db/api-swap'
+import {supabase} from '@/client/supabase'
 
 interface ShiftOption {
   id: string
   date: string
   dayOfWeek: string
-  shiftName: string
+  ownerName: string
   startTime: string
   endTime: string
+  storeId: string
 }
+
+const WEEK_DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 const ShiftSwap: React.FC = () => {
   const {user} = useAuth({guard: true})
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  // 我的班次列表
   const [myShifts, setMyShifts] = useState<ShiftOption[]>([])
-  const [selectedMyShift, setSelectedMyShift] = useState<string>('')
+  const [selectedMyShift, setSelectedMyShift] = useState<ShiftOption | null>(null)
 
-  // 目标班次（暂时使用模拟数据，后续需要从其他员工的班次中选择）
-  const [targetShifts] = useState<ShiftOption[]>([
-    {
-      id: 'target-1',
-      date: '2025-11-07',
-      dayOfWeek: '周二',
-      shiftName: '早班',
-      startTime: '08:00',
-      endTime: '16:00'
-    },
-    {
-      id: 'target-2',
-      date: '2025-11-08',
-      dayOfWeek: '周三',
-      shiftName: '晚班',
-      startTime: '16:00',
-      endTime: '24:00'
-    }
-  ])
-  const [selectedTargetShift, setSelectedTargetShift] = useState<string>('')
+  const [targetShifts, setTargetShifts] = useState<ShiftOption[]>([])
+  const [targetsLoading, setTargetsLoading] = useState(false)
+  const [selectedTargetShift, setSelectedTargetShift] = useState<ShiftOption | null>(null)
 
-  // 换班原因
   const [reason, setReason] = useState('')
 
-  // 加载我的班次
+  interface SchedQueryRow {
+    id: string
+    schedule_date: string
+    start_time: string | null
+    end_time: string | null
+    store_id: string
+    // 别名 embed 的运行时形状是对象；supabase-js 类型推断给数组，取 name 前统一收敛
+    employees?: {name?: string} | {name?: string}[] | null
+  }
+  const mapRow = (row: SchedQueryRow): ShiftOption => ({
+    id: row.id,
+    date: String(row.schedule_date).slice(0, 10),
+    dayOfWeek: WEEK_DAYS[new Date(row.schedule_date).getDay()],
+    ownerName: (Array.isArray(row.employees) ? row.employees[0]?.name : row.employees?.name) || '',
+    startTime: (row.start_time || '').slice(0, 5),
+    endTime: (row.end_time || '').slice(0, 5),
+    storeId: row.store_id
+  })
+
+  // 我的班次：本人 published、今天起、非排休
   const loadMyShifts = useCallback(async () => {
     if (!user?.id) return
-
     try {
       setLoading(true)
-      const employee = await getEmployeeByUserId(user.id)
-      if (!employee) {
-        Taro.showToast({title: '未找到员工信息', icon: 'error'})
-        return
-      }
+      setSelectedMyShift(null)
+      setSelectedTargetShift(null)
+      setTargetShifts([])
 
-      const shifts = await getEmployeeWeekShifts(employee.id)
+      const {data: empRows, error: empErr} = await supabase
+        .from('employees')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+      if (empErr) throw empErr
 
-      // 只显示未来的班次，且不是休息日
       const today = new Date().toISOString().split('T')[0]
-      const futureShifts = shifts.filter(
-        (shift) => shift.shift_date >= today && shift.shift_type !== 'rest' && shift.status !== 'completed'
-      )
+      const {data: rows, error} = await supabase
+        .from('schedules')
+        .select('id, schedule_date, start_time, end_time, store_id, employees(name)')
+        .in(
+          'employee_id',
+          (empRows || []).map((e: {id: string}) => e.id)
+        )
+        .eq('status', 'published')
+        .eq('is_day_off', false)
+        .gte('schedule_date', today)
+        .order('schedule_date')
+        .order('start_time')
+      if (error) throw error
 
-      const shiftOptions: ShiftOption[] = futureShifts.map((shift) => {
-        const date = new Date(shift.shift_date)
-        const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-        const dayOfWeek = weekDays[date.getDay()]
-
-        const shiftNames: Record<string, string> = {
-          morning: '早班',
-          afternoon: '中班',
-          evening: '晚班',
-          night: '夜班'
-        }
-
-        return {
-          id: shift.id,
-          date: shift.shift_date,
-          dayOfWeek,
-          shiftName: shiftNames[shift.shift_type] || '未知',
-          startTime: shift.start_time?.substring(0, 5) || '',
-          endTime: shift.end_time?.substring(0, 5) || ''
-        }
-      })
-
-      setMyShifts(shiftOptions)
-    } catch (error) {
-      console.error('加载班次失败:', error)
-      Taro.showToast({title: '加载失败', icon: 'error'})
+      setMyShifts(((rows || []) as unknown as SchedQueryRow[]).map(mapRow))
+    } catch (e: unknown) {
+      console.error('加载班次失败:', e)
+      Taro.showToast({title: '加载失败，请重试', icon: 'none'})
     } finally {
       setLoading(false)
     }
@@ -107,57 +101,69 @@ const ShiftSwap: React.FC = () => {
     loadMyShifts()
   })
 
-  // 提交换班申请
+  // 目标候选：所选班次同门店、其他同事、published、今天起、非排休
+  const loadTargets = useCallback(async (my: ShiftOption) => {
+    try {
+      setTargetsLoading(true)
+      setSelectedTargetShift(null)
+      const today = new Date().toISOString().split('T')[0]
+      const {data: rows, error} = await supabase
+        .from('schedules')
+        .select('id, schedule_date, start_time, end_time, store_id, employee_id, employees(name)')
+        .eq('store_id', my.storeId)
+        .eq('status', 'published')
+        .eq('is_day_off', false)
+        .gte('schedule_date', today)
+        .neq('id', my.id)
+        .order('schedule_date')
+        .order('start_time')
+      if (error) throw error
+      setTargetShifts(((rows || []) as unknown as SchedQueryRow[]).map(mapRow))
+    } catch (e: unknown) {
+      console.error('加载候选班次失败:', e)
+      Taro.showToast({title: '候选加载失败，请重试', icon: 'none'})
+    } finally {
+      setTargetsLoading(false)
+    }
+  }, [])
+
+  const handleSelectMy = (shift: ShiftOption) => {
+    setSelectedMyShift(shift)
+    loadTargets(shift)
+  }
+
   const handleSubmit = async () => {
-    if (!selectedMyShift) {
-      Taro.showToast({title: '请选择要换的班次', icon: 'none'})
+    if (!selectedMyShift || !selectedTargetShift) {
+      Taro.showToast({title: '请先选择双方班次', icon: 'none'})
       return
     }
-
-    if (!selectedTargetShift) {
-      Taro.showToast({title: '请选择目标班次', icon: 'none'})
-      return
-    }
-
     if (!reason.trim()) {
       Taro.showToast({title: '请填写换班原因', icon: 'none'})
       return
     }
-
-    if (!user?.id) return
+    if (submitting) return
 
     try {
       setSubmitting(true)
-
-      const employee = await getEmployeeByUserId(user.id)
-      if (!employee) {
-        Taro.showToast({title: '未找到员工信息', icon: 'error'})
+      const {error} = await supabase.rpc('request_schedule_swap', {
+        p_requester_schedule_id: selectedMyShift.id,
+        p_target_schedule_id: selectedTargetShift.id,
+        p_reason: reason.trim()
+      })
+      if (error) {
+        // 服务端权威拒绝：透出真实原因（同店/在职/pending 重复等）
+        Taro.showToast({
+          title: error.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''),
+          icon: 'none',
+          duration: 3000
+        })
         return
       }
-
-      // TODO: 获取目标员工ID（暂时使用模拟数据）
-      const targetEmployeeId = 'mock-target-employee-id'
-
-      const result = await createSwapRequest({
-        tenant_id: employee.tenant_id,
-        requester_id: employee.id,
-        target_id: targetEmployeeId,
-        requester_shift_id: selectedMyShift,
-        target_shift_id: selectedTargetShift,
-        reason: reason.trim()
-      })
-
-      if (result) {
-        Taro.showToast({title: '申请提交成功', icon: 'success'})
-        setTimeout(() => {
-          Taro.navigateBack()
-        }, 1500)
-      } else {
-        Taro.showToast({title: '申请提交失败', icon: 'error'})
-      }
-    } catch (error) {
-      console.error('提交换班申请失败:', error)
-      Taro.showToast({title: '提交失败', icon: 'error'})
+      Taro.showToast({title: '申请已提交，等待审批', icon: 'success'})
+      setTimeout(() => Taro.navigateBack(), 1500)
+    } catch (e: unknown) {
+      console.error('提交换班申请失败:', e)
+      Taro.showToast({title: '提交失败，请重试', icon: 'none'})
     } finally {
       setSubmitting(false)
     }
@@ -191,19 +197,21 @@ const ShiftSwap: React.FC = () => {
                       <View
                         key={shift.id}
                         className={`rounded-xl p-4 border-2 ${
-                          selectedMyShift === shift.id ? 'border-primary bg-blue-100' : 'border-border bg-gray-50/30'
+                          selectedMyShift?.id === shift.id
+                            ? 'border-primary bg-blue-100'
+                            : 'border-border bg-gray-50/30'
                         }`}
-                        onClick={() => setSelectedMyShift(shift.id)}>
+                        onClick={() => handleSelectMy(shift)}>
                         <View className="flex flex-row items-center justify-between">
                           <View>
                             <Text className="text-sm font-bold text-foreground">
                               {shift.dayOfWeek} {shift.date}
                             </Text>
                             <Text className="text-xs text-muted-foreground mt-1">
-                              {shift.shiftName} {shift.startTime} - {shift.endTime}
+                              {shift.startTime} - {shift.endTime}
                             </Text>
                           </View>
-                          {selectedMyShift === shift.id && (
+                          {selectedMyShift?.id === shift.id && (
                             <View className="i-mdi-check-circle text-2xl text-blue-600" />
                           )}
                         </View>
@@ -213,47 +221,60 @@ const ShiftSwap: React.FC = () => {
                 )}
               </View>
 
-              {/* 选择目标班次 */}
-              <View className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
-                <View className="flex flex-row items-center mb-4">
-                  <View className="i-mdi-account-switch text-2xl text-accent mr-2" />
-                  <Text className="text-lg font-semibold text-foreground">选择目标班次</Text>
-                </View>
+              {/* 选择目标班次（真实候选：同门店同事的已发布班次） */}
+              {selectedMyShift && (
+                <View className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
+                  <View className="flex flex-row items-center mb-4">
+                    <View className="i-mdi-account-switch text-2xl text-accent mr-2" />
+                    <Text className="text-lg font-semibold text-foreground">选择目标班次（同门店同事）</Text>
+                  </View>
 
-                <View className="space-y-2">
-                  {targetShifts.map((shift) => (
-                    <View
-                      key={shift.id}
-                      className={`rounded-xl p-4 border-2 ${
-                        selectedTargetShift === shift.id ? 'border-accent bg-blue-100' : 'border-border bg-gray-50/30'
-                      }`}
-                      onClick={() => setSelectedTargetShift(shift.id)}>
-                      <View className="flex flex-row items-center justify-between">
-                        <View>
-                          <Text className="text-sm font-bold text-foreground">
-                            {shift.dayOfWeek} {shift.date}
-                          </Text>
-                          <Text className="text-xs text-muted-foreground mt-1">
-                            {shift.shiftName} {shift.startTime} - {shift.endTime}
-                          </Text>
-                        </View>
-                        {selectedTargetShift === shift.id && (
-                          <View className="i-mdi-check-circle text-2xl text-accent" />
-                        )}
-                      </View>
+                  {targetsLoading ? (
+                    <Text className="text-center text-muted-foreground py-4">候选加载中...</Text>
+                  ) : targetShifts.length === 0 ? (
+                    <View className="text-center py-8">
+                      <View className="i-mdi-account-search text-5xl text-muted-foreground mb-2" />
+                      <Text className="text-muted-foreground">该门店暂无可换的同事班次</Text>
                     </View>
-                  ))}
-                </View>
+                  ) : (
+                    <View className="space-y-2">
+                      {targetShifts.map((shift) => (
+                        <View
+                          key={shift.id}
+                          className={`rounded-xl p-4 border-2 ${
+                            selectedTargetShift?.id === shift.id
+                              ? 'border-accent bg-blue-100'
+                              : 'border-border bg-gray-50/30'
+                          }`}
+                          onClick={() => setSelectedTargetShift(shift)}>
+                          <View className="flex flex-row items-center justify-between">
+                            <View>
+                              <Text className="text-sm font-bold text-foreground">
+                                {shift.ownerName || '同事'} · {shift.dayOfWeek} {shift.date}
+                              </Text>
+                              <Text className="text-xs text-muted-foreground mt-1">
+                                {shift.startTime} - {shift.endTime}
+                              </Text>
+                            </View>
+                            {selectedTargetShift?.id === shift.id && (
+                              <View className="i-mdi-check-circle text-2xl text-accent" />
+                            )}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
 
-                <View className="mt-4 p-3 bg-blue-100 rounded-xl">
-                  <View className="flex flex-row items-start">
-                    <View className="i-mdi-information text-xl text-muted-foreground mr-2 mt-0.5" />
-                    <Text className="text-xs text-muted-foreground flex-1">
-                      目前显示的是示例班次，实际使用时将显示其他员工的可换班次
-                    </Text>
+                  <View className="mt-4 p-3 bg-blue-100 rounded-xl">
+                    <View className="flex flex-row items-start">
+                      <View className="i-mdi-information text-xl text-muted-foreground mr-2 mt-0.5" />
+                      <Text className="text-xs text-muted-foreground flex-1">
+                        候选为同门店同事已发布的真实班次；是否可换由服务端在审批时做冲突校验
+                      </Text>
+                    </View>
                   </View>
                 </View>
-              </View>
+              )}
 
               {/* 换班原因 */}
               <View className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
@@ -292,7 +313,7 @@ const ShiftSwap: React.FC = () => {
                   <View className="flex flex-row items-start">
                     <View className="i-mdi-alert-circle text-xl text-muted-foreground mr-2 mt-0.5" />
                     <Text className="text-xs text-muted-foreground flex-1">
-                      提交后需要等待管理员审批，审批通过后班次将自动交换
+                      提交后等待门店/租户管理者审批；审批时服务端会校验交换后双方是否冲突，通过后自动交换
                     </Text>
                   </View>
                 </View>

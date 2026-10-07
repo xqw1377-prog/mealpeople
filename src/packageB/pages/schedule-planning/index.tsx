@@ -6,8 +6,6 @@ import {supabase} from '@/client/supabase'
 import {
   calculateRevenueZone,
   createPartTimeShift,
-  createSchedule,
-  createScheduleLog,
   deletePartTimeShift,
   getDailyOperation,
   getEmployeesByStoreId,
@@ -573,38 +571,50 @@ export default function SchedulePlanning() {
         员工列表: workingEmployees.map((e) => e.name)
       })
 
+      // P2-S1-A cutover：逐员工经 publish_schedule command 发布（服务端权威：
+      // 权限/关系完整性/冲突校验；pending 已被事实层禁止）。汇总成败如实反馈。
+      let publishedOk = 0
+      let publishedSkip = 0
+      const failures: string[] = []
+
       for (const employee of workingEmployees) {
         try {
-          // 创建排班任务
-          const schedule = await createSchedule({
-            tenant_id: currentTenant.id, // 移除可选链
-            store_id: currentStore.id,
-            employee_id: employee.id,
-            schedule_date: selectedDate,
-            shift_type: 'regular', // 正常班次
-            status: 'pending', // 待执行
-            notes: `排班规划自动生成 - 预估营收: ¥${revenue}`
+          const {data: scheduled, error: pubErr} = await supabase.rpc('publish_schedule', {
+            p_employee_id: employee.id,
+            p_schedule_date: selectedDate,
+            p_shift_type: 'regular',
+            p_start_time: '09:00',
+            p_end_time: '18:00',
+            p_notes: `排班规划发布 - 预估营收: ¥${revenue}`
           })
 
-          if (schedule) {
-            // 创建排班日志（初始状态）
-            await createScheduleLog({
-              tenant_id: currentTenant.id, // 移除可选链
-              schedule_id: schedule.id,
-              employee_id: employee.id,
-              store_id: currentStore.id,
-              log_date: selectedDate,
-              completion_status: 'pending', // 待完成
-              notes: '排班规划自动生成'
-            })
-            console.log(`✓ 已为员工 ${employee.name} 创建排班任务和日志`)
+          if (pubErr) {
+            const msg = String(pubErr.message || '')
+            if (msg.includes('CONFLICT')) {
+              publishedSkip++
+            } else {
+              failures.push(`${employee.name}: ${msg.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, '')}`)
+            }
+          } else if (scheduled) {
+            publishedOk++
           }
         } catch (error) {
-          console.error(`为员工 ${employee.name} 创建排班任务失败:`, error)
+          failures.push(`${employee.name}: ${error instanceof Error ? error.message : '发布异常'}`)
         }
       }
 
-      console.log('=== 排班任务和日志创建完成 ===')
+      if (failures.length > 0) {
+        Taro.showModal({
+          title: '部分员工发布失败',
+          content: failures.slice(0, 5).join('\n'),
+          showCancel: false
+        })
+      }
+      Taro.showToast({
+        title: `已发布 ${publishedOk} 人${publishedSkip ? ` · 冲突跳过 ${publishedSkip}` : ''}`,
+        icon: publishedOk > 0 ? 'success' : 'none',
+        duration: 2500
+      })
 
       // 如果是编辑模式，退出编辑模式
       if (isEditMode) {
@@ -625,12 +635,7 @@ export default function SchedulePlanning() {
       await loadAdjustmentHistory()
       console.log('=== 调整历史加载完成 ===')
 
-      // 显示成功提示
-      if (isEditMode) {
-        Taro.showToast({title: '排班调整已保存', icon: 'success'})
-      } else {
-        Taro.showToast({title: '保存成功', icon: 'success'})
-      }
+      // 成败汇总已在发布循环处 toast；此处不再重复提示
 
       // 触发首页数据刷新事件
       console.log('=== 触发首页数据刷新事件 ===', {

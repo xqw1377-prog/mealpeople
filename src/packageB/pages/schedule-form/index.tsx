@@ -3,7 +3,8 @@ import Taro, {getCurrentInstance, navigateBack, showToast, useDidShow} from '@ta
 import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
 import {useCallback, useEffect, useState} from 'react'
-import {createSchedule, getEmployeesByStoreId, getScheduleById, getStoresByTenantId, updateSchedule} from '@/db/api'
+import {supabase} from '@/client/supabase'
+import {getEmployeesByStoreId, getScheduleById, getStoresByTenantId} from '@/db/api'
 import type {Employee, Store} from '@/db/types'
 import {useTenantStore} from '@/store/tenant'
 
@@ -80,7 +81,7 @@ const ScheduleForm: React.FC = () => {
         showToast({title: '加载失败', icon: 'none'})
       }
     },
-    [currentTenant]
+    [currentTenant, shiftTypeValues.indexOf]
   )
 
   const loadEmployees = useCallback(async (storeId: string) => {
@@ -151,8 +152,8 @@ const ScheduleForm: React.FC = () => {
 
   // 🔥 监听门店切换事件
   useEffect(() => {
-    const handleStoreChange = (data: any) => {
-      console.log('=== 排班表单收到门店切换事件 ===', data)
+    const handleStoreChange = (data: unknown) => {
+      console.log('=== 排班表单收到门店切换事件 ===', String(data))
       // 重新加载门店列表和员工数据
       loadStores()
     }
@@ -182,70 +183,65 @@ const ScheduleForm: React.FC = () => {
     }
   }
 
+  // P2-S1-A cutover：提交走 command RPC（publish/update_schedule），
+  // 服务端做权限/关系完整性/冲突校验；不再直写 schedules（DB 已封死直写）
   const handleSubmit = async () => {
     if (!currentTenant || !user) return
 
-    // 验证必填字段
     if (!formData.schedule_date) {
-      showToast({title: '请输入排班日期', icon: 'none'})
+      showToast({title: '请选择排班日期', icon: 'none'})
       return
     }
-
     if (stores.length === 0) {
       showToast({title: '请先添加店铺', icon: 'none'})
       return
     }
-
     if (employees.length === 0) {
       showToast({title: '该店铺暂无员工', icon: 'none'})
+      return
+    }
+    if (!formData.start_time || !formData.end_time) {
+      showToast({title: '请选择起止时间', icon: 'none'})
+      return
+    }
+    if (formData.start_time === formData.end_time) {
+      showToast({title: '起止时间不得相等', icon: 'none'})
       return
     }
 
     setLoading(true)
     try {
-      if (isEditMode) {
-        // 更新排班
-        const result = await updateSchedule(scheduleId, {
-          store_id: stores[storeIndex].id,
-          employee_id: employees[employeeIndex].id,
-          schedule_date: formData.schedule_date,
-          shift_type: shiftTypeValues[shiftTypeIndex],
-          start_time: formData.start_time || null,
-          end_time: formData.end_time || null,
-          notes: formData.notes || null
-        })
+      const {error} = isEditMode
+        ? await supabase.rpc('update_schedule', {
+            p_schedule_id: scheduleId,
+            p_shift_type: shiftTypeValues[shiftTypeIndex],
+            p_start_time: formData.start_time,
+            p_end_time: formData.end_time,
+            p_notes: formData.notes || null
+          })
+        : await supabase.rpc('publish_schedule', {
+            p_employee_id: employees[employeeIndex].id,
+            p_schedule_date: formData.schedule_date,
+            p_shift_type: shiftTypeValues[shiftTypeIndex],
+            p_start_time: formData.start_time,
+            p_end_time: formData.end_time,
+            p_notes: formData.notes || null
+          })
 
-        if (result) {
-          showToast({title: '更新成功', icon: 'success'})
-          setTimeout(() => {
-            navigateBack()
-          }, 500)
-        }
-      } else {
-        // 创建排班
-        const result = await createSchedule({
-          tenant_id: currentTenant.id,
-          store_id: stores[storeIndex].id,
-          employee_id: employees[employeeIndex].id,
-          schedule_date: formData.schedule_date,
-          shift_type: shiftTypeValues[shiftTypeIndex],
-          start_time: formData.start_time || null,
-          end_time: formData.end_time || null,
-          status: 'pending',
-          notes: formData.notes || null,
-          created_by: user.id
+      if (error) {
+        // 服务端权威拒绝（AUTH_DENIED/INVALID/CONFLICT）——透出真实原因
+        showToast({
+          title: error.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''),
+          icon: 'none',
+          duration: 3000
         })
-
-        if (result) {
-          showToast({title: '创建成功', icon: 'success'})
-          setTimeout(() => {
-            navigateBack()
-          }, 500)
-        }
+        return
       }
+      showToast({title: isEditMode ? '更新成功，员工已收到通知' : '发布成功，员工已收到通知', icon: 'success'})
+      setTimeout(() => navigateBack(), 800)
     } catch (error) {
       console.error('操作失败:', error)
-      showToast({title: isEditMode ? '更新失败' : '创建失败', icon: 'none'})
+      showToast({title: isEditMode ? '更新失败' : '发布失败', icon: 'none'})
     } finally {
       setLoading(false)
     }
@@ -304,17 +300,23 @@ const ScheduleForm: React.FC = () => {
           )}
         </View>
 
-        {/* 排班日期 */}
+        {/* 排班日期（编辑模式不可改：update_schedule 语义为内容修改） */}
         <View className="mb-4">
           <Text className="text-sm text-foreground block mb-2">
             排班日期 <Text className="text-red-500">*</Text>
           </Text>
-          <Input
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl"
-            placeholder="请输入日期，格式：2025-01-15"
-            value={formData.schedule_date}
-            onInput={(e) => setFormData({...formData, schedule_date: e.detail.value})}
-          />
+          <Picker
+            mode="date"
+            value={formData.schedule_date || undefined}
+            disabled={isEditMode}
+            onChange={(e) => setFormData({...formData, schedule_date: e.detail.value})}>
+            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
+              <Text className={formData.schedule_date ? 'text-foreground' : 'text-muted-foreground'}>
+                {formData.schedule_date || '请选择日期'}
+              </Text>
+              <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
+            </View>
+          </Picker>
         </View>
 
         {/* 班次类型 */}
@@ -336,24 +338,38 @@ const ScheduleForm: React.FC = () => {
 
         {/* 开始时间 */}
         <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">开始时间</Text>
-          <Input
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl"
-            placeholder="请输入时间，格式：09:00"
-            value={formData.start_time}
-            onInput={(e) => setFormData({...formData, start_time: e.detail.value})}
-          />
+          <Text className="text-sm text-foreground block mb-2">
+            开始时间 <Text className="text-red-500">*</Text>
+          </Text>
+          <Picker
+            mode="time"
+            value={formData.start_time || undefined}
+            onChange={(e) => setFormData({...formData, start_time: e.detail.value})}>
+            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
+              <Text className={formData.start_time ? 'text-foreground' : 'text-muted-foreground'}>
+                {formData.start_time || '请选择开始时间'}
+              </Text>
+              <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
+            </View>
+          </Picker>
         </View>
 
         {/* 结束时间 */}
         <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">结束时间</Text>
-          <Input
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl"
-            placeholder="请输入时间，格式：18:00"
-            value={formData.end_time}
-            onInput={(e) => setFormData({...formData, end_time: e.detail.value})}
-          />
+          <Text className="text-sm text-foreground block mb-2">
+            结束时间 <Text className="text-red-500">*</Text>
+          </Text>
+          <Picker
+            mode="time"
+            value={formData.end_time || undefined}
+            onChange={(e) => setFormData({...formData, end_time: e.detail.value})}>
+            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
+              <Text className={formData.end_time ? 'text-foreground' : 'text-muted-foreground'}>
+                {formData.end_time || '请选择结束时间（晚于开始则跨天班）'}
+              </Text>
+              <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
+            </View>
+          </Picker>
         </View>
 
         {/* 备注 */}

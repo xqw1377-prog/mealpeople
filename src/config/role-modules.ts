@@ -36,7 +36,7 @@ export const ALL_MODULES: ModuleConfig[] = [
     id: 'my-schedule',
     name: '我的班次',
     icon: 'i-mdi-calendar-today',
-    path: '/packageG/pages/my-schedule/index',
+    path: '/packageB/pages/scheduling/index',
     platform: 'mobile',
     category: 'efficiency',
     description: '今日班次、本周排班、换班申请、考勤打卡'

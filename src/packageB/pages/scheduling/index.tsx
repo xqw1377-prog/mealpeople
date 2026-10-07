@@ -9,9 +9,23 @@ import {ScrollView, Text, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import {useCallback, useState} from 'react'
-import {getEmployeeByUserId} from '@/db/api'
-import {getEmployeeWeekShifts, getShiftStatistics} from '@/db/api-shifts'
-import type {EmployeeShift, ShiftStatistics} from '@/db/types-shifts'
+import {supabase} from '@/client/supabase'
+
+/**
+ * P2-S1-A cutover：数据源由 employee_shifts 切至 schedules（published SSOT）。
+ * 读取受 RLS schedules_select_own_published 约束：仅本人 + published，
+ * legacy 0 exposure；统计由同批数据前端推导，不再读第二张表。
+ */
+
+interface ScheduleRow {
+  id: string
+  schedule_date: string
+  shift_type: string
+  start_time: string | null
+  end_time: string | null
+  is_day_off: boolean | null
+  meal_period: string | null
+}
 
 // 班次显示数据类型
 interface ShiftDisplayData {
@@ -29,11 +43,18 @@ interface ShiftDisplayData {
   statusColor: string
 }
 
+const MEAL_LABEL: Record<string, string> = {
+  all_day: '全天',
+  breakfast: '早餐',
+  lunch: '午餐',
+  dinner: '晚餐'
+}
+
 export default function MySchedule() {
   const {user} = useAuth({guard: true})
   const [loading, setLoading] = useState(true)
   const [weekSchedule, setWeekSchedule] = useState<ShiftDisplayData[]>([])
-  const [statistics, setStatistics] = useState<ShiftStatistics>({
+  const [statistics, setStatistics] = useState({
     total_shifts: 0,
     total_hours: 0,
     completed_shifts: 0,
@@ -41,101 +62,107 @@ export default function MySchedule() {
     rest_days: 0
   })
 
-  // 获取状态信息
-  const getStatusInfo = useCallback((status: string) => {
-    const statusMap: Record<string, {text: string; color: string}> = {
-      scheduled: {text: '已排班', color: 'text-accent'},
-      confirmed: {text: '已确认', color: 'text-blue-600'},
-      completed: {text: '已完成', color: 'text-muted-foreground'},
-      cancelled: {text: '已取消', color: 'text-muted-foreground'}
-    }
-    return statusMap[status] || {text: '未知', color: 'text-muted-foreground'}
+  // 转换 schedules 行为显示格式（含工时推导：跨天 end<=start 按 +24h 计）
+  const convertSchedulesToDisplayData = useCallback((rows: ScheduleRow[]): ShiftDisplayData[] => {
+    const today = new Date().toISOString().split('T')[0]
+    const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+
+    return rows.map((row) => {
+      const date = new Date(row.schedule_date)
+      const isRest = !!row.is_day_off
+      const s = (row.start_time || '').slice(0, 5)
+      const e = (row.end_time || '').slice(0, 5)
+      let hours = 0
+      if (!isRest && s && e) {
+        const [sh, sm] = s.split(':').map(Number)
+        const [eh, em] = e.split(':').map(Number)
+        let diff = eh * 60 + em - (sh * 60 + sm)
+        if (diff <= 0) diff += 24 * 60
+        hours = Math.round((diff / 60) * 10) / 10
+      }
+      return {
+        date: row.schedule_date,
+        dayOfWeek: weekDays[date.getDay()],
+        shiftName: isRest
+          ? `休息（${MEAL_LABEL[row.meal_period || 'all_day'] || '全天'}）`
+          : row.start_time
+            ? '班次'
+            : '班次',
+        startTime: s,
+        endTime: e,
+        hours,
+        storeName: '',
+        position: '',
+        isToday: row.schedule_date === today,
+        isRestDay: isRest,
+        status: '已发布',
+        statusColor: 'text-accent'
+      }
+    })
   }, [])
 
-  // 转换班次数据为显示格式
-  const convertShiftsToDisplayData = useCallback(
-    (shifts: EmployeeShift[]): ShiftDisplayData[] => {
-      const today = new Date().toISOString().split('T')[0]
-      const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-
-      return shifts.map((shift) => {
-        const date = new Date(shift.shift_date)
-        const dayOfWeek = weekDays[date.getDay()]
-        const isToday = shift.shift_date === today
-        const isRestDay = shift.shift_type === 'rest'
-
-        // 获取班次名称
-        const shiftNames: Record<string, string> = {
-          morning: '早班',
-          afternoon: '中班',
-          evening: '晚班',
-          night: '夜班',
-          rest: '休息'
-        }
-
-        // 获取状态信息
-        const statusInfo = getStatusInfo(shift.status)
-
-        return {
-          date: shift.shift_date,
-          dayOfWeek,
-          shiftName: shiftNames[shift.shift_type] || '未知',
-          startTime: shift.start_time?.substring(0, 5) || '',
-          endTime: shift.end_time?.substring(0, 5) || '',
-          hours: shift.work_hours || 0,
-          storeName: '门店', // TODO: 从store_id获取门店名称
-          position: shift.position || '未指定',
-          isToday,
-          isRestDay,
-          status: statusInfo.text,
-          statusColor: statusInfo.color
-        }
-      })
-    },
-    [getStatusInfo]
-  )
-
-  // 加载班次数据
+  // 加载班次数据（schedules published SSOT）
   const loadShifts = useCallback(async () => {
     if (!user?.id) return
 
     setLoading(true)
     try {
-      // 获取员工信息
-      const employee = await getEmployeeByUserId(user.id)
-      if (!employee) {
-        Taro.showToast({title: '未找到员工信息', icon: 'none'})
+      // 本人全部在职员工身份（User→Employee 为 1:N）
+      const {data: empRows, error: empErr} = await supabase
+        .from('employees')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+      if (empErr) throw empErr
+      if (!empRows || empRows.length === 0) {
+        setWeekSchedule([])
+        setStatistics({total_shifts: 0, total_hours: 0, completed_shifts: 0, scheduled_shifts: 0, rest_days: 0})
         setLoading(false)
         return
       }
+      const employeeIds = empRows.map((e: {id: string}) => e.id)
 
-      // 获取本周班次
-      const shifts = await getEmployeeWeekShifts(employee.id)
-
-      // 获取本周统计
+      // 本周区间（周一至周日）
       const today = new Date()
       const dayOfWeek = today.getDay()
       const monday = new Date(today)
       monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1))
       const sunday = new Date(monday)
       sunday.setDate(monday.getDate() + 6)
-
       const startDate = monday.toISOString().split('T')[0]
       const endDate = sunday.toISOString().split('T')[0]
 
-      const stats = await getShiftStatistics(employee.id, startDate, endDate)
-      setStatistics(stats)
+      // schedules published（RLS：仅本人 + published，legacy 天然不可见）
+      const {data: rows, error: rowsErr} = await supabase
+        .from('schedules')
+        .select('id, schedule_date, shift_type, start_time, end_time, is_day_off, meal_period')
+        .in('employee_id', employeeIds)
+        .eq('status', 'published')
+        .gte('schedule_date', startDate)
+        .lte('schedule_date', endDate)
+        .order('schedule_date', {ascending: true})
+        .order('start_time', {ascending: true, nullsFirst: false})
+      if (rowsErr) throw rowsErr
 
-      // 转换为显示数据
-      const displayData = convertShiftsToDisplayData(shifts)
+      const displayData = convertSchedulesToDisplayData((rows || []) as ScheduleRow[])
       setWeekSchedule(displayData)
+
+      // 统计由同一批事实推导
+      const workRows = displayData.filter((d) => !d.isRestDay)
+      setStatistics({
+        total_shifts: displayData.length,
+        total_hours: Math.round(workRows.reduce((sum, d) => sum + d.hours, 0) * 10) / 10,
+        completed_shifts: 0,
+        scheduled_shifts: workRows.length,
+        rest_days: displayData.length - workRows.length
+      })
     } catch (error) {
       console.error('加载班次失败:', error)
-      Taro.showToast({title: '加载失败', icon: 'error'})
+      Taro.showToast({title: '加载失败，请重试', icon: 'none'})
     } finally {
       setLoading(false)
     }
-  }, [user, convertShiftsToDisplayData])
+  }, [user, convertSchedulesToDisplayData])
 
   // 页面显示时加载数据
   useDidShow(() => {
@@ -321,9 +348,9 @@ export default function MySchedule() {
                 </View>
 
                 <View className="space-y-3">
-                  {displaySchedule.map((shift, index) => (
+                  {displaySchedule.map((shift) => (
                     <View
-                      key={index}
+                      key={shift.date}
                       className={`rounded-xl p-4 ${
                         shift.isToday ? 'bg-blue-100 border-2 border-border' : 'bg-gray-50/30'
                       }`}>

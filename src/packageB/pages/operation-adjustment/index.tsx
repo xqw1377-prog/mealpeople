@@ -442,7 +442,7 @@ export default function OperationAdjustment() {
                   onClick={() => {
                     // 跳转到排班规划页面
                     Taro.navigateTo({
-                      url: `/packageC/pages/schedule-planning/index?storeId=${stores[selectedStoreIndex]?.id}&date=${selectedDate}&revenue=${middayEstimatedRevenue}`
+                      url: `/packageB/pages/schedule-planning/index?storeId=${stores[selectedStoreIndex]?.id}&date=${selectedDate}&revenue=${middayEstimatedRevenue}`
                     })
                   }}
                   className="bg-blue-100 text-white rounded-lg w-full mt-4 py-3 break-keep text-base"

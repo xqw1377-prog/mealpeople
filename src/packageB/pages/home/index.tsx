@@ -532,7 +532,7 @@ const Home: React.FC = () => {
   }
 
   const getOverallStatus = () => {
-    if (!dashboardData || !dashboardData.basic)
+    if (!dashboardData?.basic)
       return {text: '暂无数据', icon: '📊', color: 'text-muted-foreground', bgColor: 'bg-gray-50'}
 
     const {accumulated} = dashboardData.basic
@@ -730,7 +730,7 @@ const Home: React.FC = () => {
                     <SkeletonCard />
                     <SkeletonCard />
                   </View>
-                ) : !dashboardData || !dashboardData.basic ? (
+                ) : !dashboardData?.basic ? (
                   <View className="bg-white rounded-lg p-8 border-2 border-gray-200 text-center mb-4">
                     <View className="i-mdi-chart-box-outline text-6xl text-gray-300 mx-auto mb-4" />
                     <Text className="text-base text-muted-foreground block mb-2">暂无运营数据</Text>
@@ -1092,10 +1092,10 @@ const Home: React.FC = () => {
                     </View>
 
                     <View
-                      className="bg-blue-100 rounded-lg p-3 active:bg-purple-100"
-                      onClick={() => navigateTo({url: '/packageB/pages/monthly-schedule/index'})}>
-                      <View className="i-mdi-calendar-month text-2xl text-muted-foreground mb-1" />
-                      <Text className="text-xs text-purple-700 block">每月排班</Text>
+                      className="bg-blue-100 rounded-lg p-3 active:bg-green-100"
+                      onClick={() => navigateTo({url: '/packageB/pages/schedules/index'})}>
+                      <View className="i-mdi-calendar-text text-2xl text-muted-foreground mb-1" />
+                      <Text className="text-xs text-green-600 block">排班列表</Text>
                     </View>
 
                     <View

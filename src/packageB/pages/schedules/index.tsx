@@ -5,12 +5,13 @@ import type React from 'react'
 import {useCallback, useEffect, useState} from 'react'
 import {EmptyState} from '@/components/EmptyState'
 import {SkeletonList} from '@/components/Skeleton'
-import {deleteSchedule, getSchedulesByTenantId, getStoresByTenantId} from '@/db/api'
+import {getSchedulesByTenantId, getStoresByTenantId} from '@/db/api'
+import {supabase} from '@/client/supabase'
 import type {Schedule, Store} from '@/db/types'
 import {useTenantStore} from '@/store/tenant'
 
 const Schedules: React.FC = () => {
-  const {user} = useAuth({guard: true})
+  useAuth({guard: true})
   const currentTenant = useTenantStore((state) => state.currentTenant)
   const currentStore = useTenantStore((state) => state.currentStore) // 🔥 获取全局门店
   const setCurrentStore = useTenantStore((state) => state.setCurrentStore) // 🔥 获取设置门店方法
@@ -44,9 +45,11 @@ const Schedules: React.FC = () => {
         getSchedulesByTenantId(currentTenant.id),
         getStoresByTenantId(currentTenant.id)
       ])
-      setSchedules(schedulesData)
+      // P2-S1-A：legacy 为 pre-authority 存量事实，隔离不展示（A4）
+      const activeSchedules = schedulesData.filter((s) => s.status !== 'legacy')
+      setSchedules(activeSchedules)
       setStores(storesData)
-      setFilteredSchedules(schedulesData)
+      setFilteredSchedules(activeSchedules)
 
       // 🔥 同步全局门店状态
       if (currentStore && storesData.length > 0) {
@@ -170,22 +173,23 @@ const Schedules: React.FC = () => {
     [stores, setCurrentStore]
   )
 
+  // P2-S1-A cutover：物理删除已封死（无 DELETE policy），改为取消发布（command）
   const handleDelete = useCallback(
     async (id: string) => {
       const result = await showModal({
-        title: '确认删除',
-        content: '确定要删除这条排班记录吗？',
-        confirmText: '删除',
-        cancelText: '取消'
+        title: '确认取消排班',
+        content: '取消后员工将收到通知；该记录保留为 cancelled 事实轨迹。',
+        confirmText: '取消排班',
+        cancelText: '保留'
       })
 
       if (result.confirm) {
-        const success = await deleteSchedule(id)
-        if (success) {
-          showToast({title: '删除成功', icon: 'success'})
-          loadData()
+        const {error} = await supabase.rpc('cancel_schedule', {p_schedule_id: id, p_reason: '管理员在排班列表取消'})
+        if (error) {
+          showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
         } else {
-          showToast({title: '删除失败', icon: 'none'})
+          showToast({title: '已取消', icon: 'success'})
+          loadData()
         }
       }
     },
@@ -202,6 +206,8 @@ const Schedules: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'published':
+        return 'text-white bg-green-500'
       case 'completed':
         return 'text-muted-foreground bg-blue-100'
       case 'confirmed':
@@ -217,6 +223,8 @@ const Schedules: React.FC = () => {
 
   const getStatusText = (status: string) => {
     switch (status) {
+      case 'published':
+        return '已发布'
       case 'completed':
         return '已完成'
       case 'confirmed':
@@ -394,7 +402,7 @@ const Schedules: React.FC = () => {
                   <View className="flex items-center gap-2 pt-3 border-t border-gray-100">
                     <View
                       className="flex-1 bg-blue-100 text-white rounded-xl py-2 flex items-center justify-center gap-1"
-                      onClick={() => navigateTo({url: `/packageC/pages/schedule-form/index?id=${schedule.id}`})}>
+                      onClick={() => navigateTo({url: `/packageB/pages/schedule-form/index?id=${schedule.id}`})}>
                       <View className="i-mdi-pencil text-base"></View>
                       <Text className="text-sm font-medium text-muted-foreground">编辑</Text>
                     </View>
@@ -402,7 +410,9 @@ const Schedules: React.FC = () => {
                       className="flex-1 bg-blue-100 text-red-600 rounded-xl py-2 flex items-center justify-center gap-1"
                       onClick={() => handleDelete(schedule.id)}>
                       <View className="i-mdi-delete text-base"></View>
-                      <Text className="text-sm font-medium text-red-600">删除</Text>
+                      <Text className="text-sm font-medium text-red-600">
+                        {schedule.status === 'published' ? '取消发布' : '已取消'}
+                      </Text>
                     </View>
                   </View>
                 </View>

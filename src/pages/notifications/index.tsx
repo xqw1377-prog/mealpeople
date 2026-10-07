@@ -199,6 +199,16 @@ const Notifications: React.FC = () => {
           })
         }
       }
+
+      // P2-S1-A：排班类通知进入正确上下文
+      // 换班相关（申请待审批 / 换班结果）→ 换班记录与审批页；其余排班变更 → 我的班次
+      if (notification.related_type === 'schedule') {
+        if (notification.title.includes('换班')) {
+          Taro.navigateTo({url: '/packageB/pages/swap-records/index'})
+        } else {
+          Taro.navigateTo({url: '/packageB/pages/scheduling/index'})
+        }
+      }
     },
     [handleMarkAsRead]
   )

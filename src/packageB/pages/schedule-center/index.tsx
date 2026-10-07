@@ -8,7 +8,7 @@ import Taro from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 
 export default function ScheduleCenter() {
-  const {user} = useAuth({guard: true})
+  useAuth({guard: true})
 
   // 导航到具体功能
   const handleNavigate = (path: string) => {
@@ -89,17 +89,17 @@ export default function ScheduleCenter() {
                   </View>
                 </View>
 
-                {/* 月度排班 */}
+                {/* 换班审批（P2-S1-A 新增：真实审批入口） */}
                 <View
                   className="bg-white rounded-lg p-4 border-2 border-gray-200 active:opacity-70 transition-all cursor-pointer"
-                  onClick={() => handleNavigateToPackage('/packageB/pages/monthly-schedule/index')}>
+                  onClick={() => handleNavigateToPackage('/packageB/pages/swap-records/index')}>
                   <View className="flex items-center gap-3">
                     <View className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <View className="i-mdi-calendar-month text-xl text-blue-600" />
+                      <View className="i-mdi-swap-horizontal text-xl text-blue-600" />
                     </View>
                     <View className="flex-1">
-                      <Text className="text-sm font-medium text-foreground">月度排班</Text>
-                      <Text className="text-xs text-muted-foreground mt-0.5">查看月度排班日历</Text>
+                      <Text className="text-sm font-medium text-foreground">换班审批</Text>
+                      <Text className="text-xs text-muted-foreground mt-0.5">处理员工的换班申请</Text>
                     </View>
                     <View className="i-mdi-chevron-right text-lg text-muted-foreground flex-shrink-0" />
                   </View>
