@@ -159,7 +159,7 @@ export const ALL_MODULES: ModuleConfig[] = [
     id: 'scheduling-management',
     name: '排班管理',
     icon: 'i-mdi-calendar-clock',
-    path: '/packageB/pages/scheduling/index',
+    path: '/packageB/pages/schedule-center/index',
     platform: 'web',
     category: 'management',
     description: '排班规划、班次配置、排班统计'

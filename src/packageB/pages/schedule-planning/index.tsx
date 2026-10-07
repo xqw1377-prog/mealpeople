@@ -231,12 +231,14 @@ export default function SchedulePlanning() {
       })
 
       // 从数据库中获取排班记录，确定哪些员工有排班（上岗）
+      // P2-S1-A-R1：上岗判定只认 published（legacy/cancelled 不得计入）
       const {data: schedules} = await supabase
         .from('schedules')
         .select('employee_id')
         .eq('tenant_id', currentTenant?.id)
         .eq('store_id', currentStore.id)
         .eq('schedule_date', selectedDate)
+        .eq('status', 'published')
 
       console.log('=== 排班记录 ===', schedules)
 
@@ -571,49 +573,15 @@ export default function SchedulePlanning() {
         员工列表: workingEmployees.map((e) => e.name)
       })
 
-      // P2-S1-A cutover：逐员工经 publish_schedule command 发布（服务端权威：
-      // 权限/关系完整性/冲突校验；pending 已被事实层禁止）。汇总成败如实反馈。
-      let publishedOk = 0
-      let publishedSkip = 0
-      const failures: string[] = []
-
-      for (const employee of workingEmployees) {
-        try {
-          const {data: scheduled, error: pubErr} = await supabase.rpc('publish_schedule', {
-            p_employee_id: employee.id,
-            p_schedule_date: selectedDate,
-            p_shift_type: 'regular',
-            p_start_time: '09:00',
-            p_end_time: '18:00',
-            p_notes: `排班规划发布 - 预估营收: ¥${revenue}`
-          })
-
-          if (pubErr) {
-            const msg = String(pubErr.message || '')
-            if (msg.includes('CONFLICT')) {
-              publishedSkip++
-            } else {
-              failures.push(`${employee.name}: ${msg.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, '')}`)
-            }
-          } else if (scheduled) {
-            publishedOk++
-          }
-        } catch (error) {
-          failures.push(`${employee.name}: ${error instanceof Error ? error.message : '发布异常'}`)
-        }
-      }
-
-      if (failures.length > 0) {
-        Taro.showModal({
-          title: '部分员工发布失败',
-          content: failures.slice(0, 5).join('\n'),
-          showCancel: false
-        })
-      }
+      // P2-S1-A-R1（Blocker 2）：规划层不发布事实。
+      // 旧代码创建无时间的 pending 行，S1-A 首版为凑 command 必填项虚构 09:00-18:00——
+      // 均属编造业务事实。本页仅保存规划（daily_operations / schedule_results）；
+      // 正式发布经 schedule-form（publish_schedule，显式班段）完成，
+      // S1-B 再补「人 → 班段 → 冲突 → 发布」完整流。
       Taro.showToast({
-        title: `已发布 ${publishedOk} 人${publishedSkip ? ` · 冲突跳过 ${publishedSkip}` : ''}`,
-        icon: publishedOk > 0 ? 'success' : 'none',
-        duration: 2500
+        title: '规划已保存；正式发布请在「创建排班」为员工指定班段',
+        icon: 'none',
+        duration: 3000
       })
 
       // 如果是编辑模式，退出编辑模式

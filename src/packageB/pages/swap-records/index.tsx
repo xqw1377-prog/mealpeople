@@ -75,6 +75,7 @@ const SwapRecords: React.FC = () => {
         .from('shift_swap_requests')
         .select(
           'id, status, reason, review_notes, created_at, requester_id, target_id, ' +
+            'requester_shift_id, target_shift_id, ' +
             'requester:employees!shift_swap_requests_requester_id_fkey(name), ' +
             'target:employees!shift_swap_requests_target_id_fkey(name), ' +
             'requester_shift:schedules!shift_swap_requests_requester_shift_fkey(schedule_date, start_time, end_time), ' +
@@ -83,9 +84,30 @@ const SwapRecords: React.FC = () => {
         .order('created_at', {ascending: false})
         .limit(100)
       if (error) throw error
+      const list = (rows || []) as unknown as (SwapRow & {requester_shift_id?: string; target_shift_id?: string})[]
+
+      // P2-S1-A-R1：schedules 表级 RLS 收紧后，员工侧同事班次的 embed 会被过滤为 null
+      // → 用专用最小读 RPC get_swap_shift_brief 补齐（仅日期/起止，无内部字段）
+      const briefCache = new Map<
+        string,
+        {schedule_date: string; start_time: string | null; end_time: string | null} | null
+      >()
+      const fetchBrief = async (sid?: string) => {
+        if (!sid) return null
+        if (briefCache.has(sid)) return briefCache.get(sid) ?? null
+        const {data} = await supabase.rpc('get_swap_shift_brief', {p_schedule_id: sid})
+        const brief =
+          ((data as unknown as {schedule_date: string; start_time: string; end_time: string}[] | null) || [])[0] || null
+        briefCache.set(sid, brief)
+        return brief
+      }
+      for (const r of list) {
+        if (!r.requester_shift) r.requester_shift = await fetchBrief(r.requester_shift_id)
+        if (!r.target_shift) r.target_shift = await fetchBrief(r.target_shift_id)
+      }
 
       setRequests(
-        ((rows || []) as unknown as SwapRow[]).map((r) => {
+        list.map((r) => {
           const info = getStatusInfo(r.status)
           return {...r, statusName: info.name, statusColor: info.color, statusIcon: info.icon}
         })

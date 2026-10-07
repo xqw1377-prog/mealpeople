@@ -101,24 +101,35 @@ const ShiftSwap: React.FC = () => {
     loadMyShifts()
   })
 
-  // 目标候选：所选班次同门店、其他同事、published、今天起、非排休
+  // 目标候选：专用最小读 RPC（P2-S1-A-R1：不再放宽表级 RLS；
+  // 服务端验证本人 published 班次，仅返回 schedule_id/姓名/日期/起止时间）
   const loadTargets = useCallback(async (my: ShiftOption) => {
     try {
       setTargetsLoading(true)
       setSelectedTargetShift(null)
-      const today = new Date().toISOString().split('T')[0]
-      const {data: rows, error} = await supabase
-        .from('schedules')
-        .select('id, schedule_date, start_time, end_time, store_id, employee_id, employees(name)')
-        .eq('store_id', my.storeId)
-        .eq('status', 'published')
-        .eq('is_day_off', false)
-        .gte('schedule_date', today)
-        .neq('id', my.id)
-        .order('schedule_date')
-        .order('start_time')
+      const {data: rows, error} = await supabase.rpc('list_schedule_swap_candidates', {
+        p_requester_schedule_id: my.id
+      })
       if (error) throw error
-      setTargetShifts(((rows || []) as unknown as SchedQueryRow[]).map(mapRow))
+      setTargetShifts(
+        (
+          (rows || []) as unknown as {
+            schedule_id: string
+            employee_name: string
+            schedule_date: string
+            start_time: string
+            end_time: string
+          }[]
+        ).map((r) => ({
+          id: r.schedule_id,
+          date: String(r.schedule_date).slice(0, 10),
+          dayOfWeek: WEEK_DAYS[new Date(r.schedule_date).getDay()],
+          ownerName: r.employee_name || '',
+          startTime: (r.start_time || '').slice(0, 5),
+          endTime: (r.end_time || '').slice(0, 5),
+          storeId: ''
+        }))
+      )
     } catch (e: unknown) {
       console.error('加载候选班次失败:', e)
       Taro.showToast({title: '候选加载失败，请重试', icon: 'none'})

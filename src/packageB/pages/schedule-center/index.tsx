@@ -132,21 +132,8 @@ export default function ScheduleCenter() {
                   </View>
                 </View>
 
-                {/* 排班优化 */}
-                <View
-                  className="bg-white rounded-lg p-4 border-2 border-gray-200 active:opacity-70 transition-all cursor-pointer"
-                  onClick={() => handleNavigateToPackage('/packageB/pages/schedule-optimization/index')}>
-                  <View className="flex items-center gap-3">
-                    <View className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <View className="i-mdi-chart-line text-xl text-blue-600" />
-                    </View>
-                    <View className="flex-1">
-                      <Text className="text-sm font-medium text-foreground">排班优化</Text>
-                      <Text className="text-xs text-muted-foreground mt-0.5">优化现有排班方案</Text>
-                    </View>
-                    <View className="i-mdi-chevron-right text-lg text-muted-foreground flex-shrink-0" />
-                  </View>
-                </View>
+                {/* 排班优化入口已按 P2-S1 映射 RETIRE（本地计算不落库，无事实来源）；
+                    S1-B 与排班规划合并评估后再定去留 */}
               </View>
             </View>
 
