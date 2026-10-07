@@ -1,405 +1,375 @@
-import {Button, Input, Picker, Text, View} from '@tarojs/components'
-import Taro, {getCurrentInstance, navigateBack, showToast, useDidShow} from '@tarojs/taro'
+/**
+ * 创建/修改排班 · P2-S1-B 重设计
+ * 主线：谁 → 哪一天 → 什么班段 → 备注 → 发布
+ * - 班段 = 类型 + 显式起止时间（或排休 + 餐段粒度）；绝不隐含默认时间
+ * - inline 校验贴近字段；服务端 CONFLICT 映射到时间字段旁解释
+ * - 编辑模式：员工/日期不可变（update_schedule 语义 = 内容修改）
+ * - 提交走 command RPC（publish_schedule / update_schedule），防重复提交
+ * DS：TabHero / Field / tokens
+ */
+
+import {Picker, Text, Textarea, View} from '@tarojs/components'
+import {getCurrentInstance, navigateBack, showToast} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
 import {useCallback, useEffect, useState} from 'react'
 import {supabase} from '@/client/supabase'
+import {Field, TabHero} from '@/components/ds'
 import {getEmployeesByStoreId, getScheduleById, getStoresByTenantId} from '@/db/api'
 import type {Employee, Store} from '@/db/types'
 import {useTenantStore} from '@/store/tenant'
 
+const SEGMENTS = ['早班', '中班', '晚班', '全天班', '自定义']
+const SEGMENT_VALUES = ['morning', 'afternoon', 'evening', 'full_day', 'custom']
+// 常用班段快捷时段（仅作为 picker 初始值建议，用户显式选择才生效）
+const SEGMENT_HOURS: Record<string, [string, string]> = {
+  morning: ['07:00', '15:00'],
+  afternoon: ['11:00', '19:00'],
+  evening: ['15:00', '23:00'],
+  full_day: ['09:00', '21:00']
+}
+const MEALS = ['全天休息', '早餐段', '午餐段', '晚餐段']
+const MEAL_VALUES = ['all_day', 'breakfast', 'lunch', 'dinner']
+
 const ScheduleForm: React.FC = () => {
-  const {user} = useAuth({guard: true})
+  useAuth({guard: true})
   const currentTenant = useTenantStore((state) => state.currentTenant)
-  const currentStore = useTenantStore((state) => state.currentStore) // 🔥 获取全局门店
-  const setCurrentStore = useTenantStore((state) => state.setCurrentStore) // 🔥 获取设置门店方法
   const [stores, setStores] = useState<Store[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [storeIndex, setStoreIndex] = useState(0)
   const [employeeIndex, setEmployeeIndex] = useState(0)
-  const [shiftTypeIndex, setShiftTypeIndex] = useState(0)
-  const [formData, setFormData] = useState({
-    schedule_date: '',
-    start_time: '',
-    end_time: '',
-    notes: ''
-  })
-  const [loading, setLoading] = useState(false)
-  const [isEditMode, setIsEditMode] = useState(false)
-  const [scheduleId, setScheduleId] = useState<string>('')
 
-  const shiftTypes = ['早班', '中班', '晚班', '全天']
-  const shiftTypeValues = ['morning', 'afternoon', 'evening', 'full_day']
+  const [date, setDate] = useState('')
+  const [isDayOff, setIsDayOff] = useState(false)
+  const [segmentIndex, setSegmentIndex] = useState(0)
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [mealIndex, setMealIndex] = useState(0)
+  const [notes, setNotes] = useState('')
 
-  // 获取URL参数
-  const instance = getCurrentInstance()
-  const params = instance.router?.params
+  const [fieldErrors, setFieldErrors] = useState<{date?: string; time?: string; employee?: string}>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
-  console.log('=== 排班表单页面渲染 ===', {
-    租户: currentTenant?.name,
-    门店: currentStore?.name,
-    编辑模式: isEditMode
-  })
+  const [editId, setEditId] = useState('')
+  const isEdit = !!editId
 
-  const loadSchedule = useCallback(
-    async (id: string) => {
-      try {
-        const schedule = await getScheduleById(id)
-        if (schedule) {
-          setFormData({
-            schedule_date: schedule.schedule_date,
-            start_time: schedule.start_time || '',
-            end_time: schedule.end_time || '',
-            notes: schedule.notes || ''
-          })
-
-          // 设置班次类型
-          const typeIndex = shiftTypeValues.indexOf(schedule.shift_type)
-          if (typeIndex !== -1) {
-            setShiftTypeIndex(typeIndex)
-          }
-
-          // 加载店铺和员工数据后设置选中项
-          const storesData = await getStoresByTenantId(currentTenant?.id)
-          setStores(storesData)
-
-          const storeIdx = storesData.findIndex((s) => s.id === schedule.store_id)
-          if (storeIdx !== -1) {
-            setStoreIndex(storeIdx)
-
-            const employeesData = await getEmployeesByStoreId(schedule.store_id)
-            setEmployees(employeesData)
-
-            const empIdx = employeesData.findIndex((e) => e.id === schedule.employee_id)
-            if (empIdx !== -1) {
-              setEmployeeIndex(empIdx)
-            }
-          }
-        }
-      } catch (error) {
-        console.error('加载排班信息失败:', error)
-        showToast({title: '加载失败', icon: 'none'})
-      }
-    },
-    [currentTenant, shiftTypeValues.indexOf]
-  )
-
-  const loadEmployees = useCallback(async (storeId: string) => {
-    try {
-      const employeesData = await getEmployeesByStoreId(storeId)
-      setEmployees(employeesData)
-    } catch (error) {
-      console.error('加载员工列表失败:', error)
-      showToast({title: '加载员工失败', icon: 'none'})
-    }
-  }, [])
+  const params = getCurrentInstance().router?.params
 
   const loadStores = useCallback(async () => {
     if (!currentTenant) return
-
     try {
-      console.log('=== 加载门店列表 ===')
       const storesData = await getStoresByTenantId(currentTenant.id)
       setStores(storesData)
-
-      // 🔥 如果全局状态有门店，使用全局门店
-      if (currentStore && storesData.length > 0) {
-        const index = storesData.findIndex((s) => s.id === currentStore.id)
-        if (index >= 0) {
-          console.log('=== 使用全局门店 ===', currentStore.name)
-          setStoreIndex(index)
-          loadEmployees(currentStore.id)
-        } else {
-          // 全局门店不在列表中，使用第一个
-          console.log('=== 全局门店不在列表中，使用第一个 ===')
-          setStoreIndex(0)
-          setCurrentStore(storesData[0])
-          loadEmployees(storesData[0].id)
-          // 🔥 发送门店切换事件
-          Taro.eventCenter.trigger('storeChanged', {
-            store: storesData[0],
-            timestamp: Date.now()
-          })
-        }
-      } else if (storesData.length > 0) {
-        // 没有全局门店，使用第一个并设置为全局门店
-        console.log('=== 设置第一个门店为全局门店 ===', storesData[0].name)
-        setStoreIndex(0)
-        setCurrentStore(storesData[0])
-        loadEmployees(storesData[0].id)
-        // 🔥 发送门店切换事件，通知其他页面
-        Taro.eventCenter.trigger('storeChanged', {
-          store: storesData[0],
-          timestamp: Date.now()
-        })
+      if (storesData.length > 0) {
+        const emps = await getEmployeesByStoreId(storesData[0].id)
+        setEmployees(emps.filter((e) => e.status === 'active'))
       }
-    } catch (error) {
-      console.error('加载店铺列表失败:', error)
-      showToast({title: '加载店铺失败', icon: 'none'})
+    } catch (e) {
+      console.error('加载门店失败:', e)
+      setLoadError('门店/员工加载失败，请返回重试')
     }
-  }, [currentTenant, currentStore, setCurrentStore, loadEmployees])
+  }, [currentTenant])
+
+  // 编辑模式：载入既有 published 班次（仅内容字段可改）
+  const loadSchedule = useCallback(async (id: string) => {
+    try {
+      const s = await getScheduleById(id)
+      if (!s || s.status !== 'published') {
+        setLoadError('班次不存在或不可编辑（仅已发布班次可修改）')
+        return
+      }
+      setDate(String(s.schedule_date).slice(0, 10))
+      setIsDayOff(!!s.is_day_off)
+      setStartTime(s.start_time ? String(s.start_time).slice(0, 5) : '')
+      setEndTime(s.end_time ? String(s.end_time).slice(0, 5) : '')
+      setMealIndex(Math.max(0, MEAL_VALUES.indexOf(s.meal_period || 'all_day')))
+      setSegmentIndex(s.shift_type === 'day_off' ? 0 : Math.max(0, SEGMENT_VALUES.indexOf(s.shift_type)))
+      setNotes(s.notes || '')
+    } catch (e) {
+      console.error('加载班次失败:', e)
+      setLoadError('班次加载失败，请返回重试')
+    }
+  }, [])
 
   useEffect(() => {
-    // 检查是否为编辑模式
     if (params?.id) {
-      setIsEditMode(true)
-      setScheduleId(params.id)
+      setEditId(params.id)
       loadSchedule(params.id)
     } else {
       loadStores()
     }
   }, [params, loadStores, loadSchedule])
 
-  // 🔥 监听门店切换事件
-  useEffect(() => {
-    const handleStoreChange = (data: unknown) => {
-      console.log('=== 排班表单收到门店切换事件 ===', String(data))
-      // 重新加载门店列表和员工数据
-      loadStores()
-    }
-
-    Taro.eventCenter.on('storeChanged', handleStoreChange)
-
-    return () => {
-      Taro.eventCenter.off('storeChanged', handleStoreChange)
-    }
-  }, [loadStores])
-
-  // 🔥 页面显示时刷新数据
-  useDidShow(() => {
-    console.log('=== 排班表单页面显示 ===')
-    if (!isEditMode) {
-      loadStores()
-    }
-  })
-
-  const handleStoreChange = (index: number) => {
-    setStoreIndex(index)
+  const onStoreChange = async (i: number) => {
+    setStoreIndex(i)
     setEmployeeIndex(0)
-    if (stores[index]) {
-      // 🔥 更新全局门店状态
-      setCurrentStore(stores[index])
-      loadEmployees(stores[index].id)
-    }
+    const emps = await getEmployeesByStoreId(stores[i].id)
+    setEmployees(emps.filter((e) => e.status === 'active'))
   }
 
-  // P2-S1-A cutover：提交走 command RPC（publish/update_schedule），
-  // 服务端做权限/关系完整性/冲突校验；不再直写 schedules（DB 已封死直写）
-  const handleSubmit = async () => {
-    if (!currentTenant || !user) return
+  const applySegment = (i: number) => {
+    setSegmentIndex(i)
+    const v = SEGMENT_VALUES[i]
+    if (v !== 'custom' && SEGMENT_HOURS[v]) {
+      setStartTime(SEGMENT_HOURS[v][0])
+      setEndTime(SEGMENT_HOURS[v][1])
+    }
+    setFieldErrors((f) => ({...f, time: undefined}))
+  }
 
-    if (!formData.schedule_date) {
-      showToast({title: '请选择排班日期', icon: 'none'})
-      return
+  // 服务端错误 → 字段级解释
+  const mapServerError = (msg: string) => {
+    if (msg.includes('重叠') || msg.includes('overlap')) {
+      return {time: `所选时间段与该员工已有班次冲突：${msg}`, date: undefined, employee: undefined}
     }
-    if (stores.length === 0) {
-      showToast({title: '请先添加店铺', icon: 'none'})
-      return
+    if (msg.includes('排休') || msg.includes('rest')) {
+      return {time: undefined, date: `当天安排冲突：${msg}`, employee: undefined}
     }
-    if (employees.length === 0) {
-      showToast({title: '该店铺暂无员工', icon: 'none'})
-      return
+    if (msg.includes('员工') || msg.includes('权限')) {
+      return {time: undefined, date: undefined, employee: msg}
     }
-    if (!formData.start_time || !formData.end_time) {
-      showToast({title: '请选择起止时间', icon: 'none'})
-      return
-    }
-    if (formData.start_time === formData.end_time) {
-      showToast({title: '起止时间不得相等', icon: 'none'})
-      return
-    }
+    return {time: undefined, date: undefined, employee: undefined}
+  }
 
-    setLoading(true)
+  const validate = (): boolean => {
+    const errs: typeof fieldErrors = {}
+    if (!isDayOff && !date) errs.date = '请选择日期'
+    if (isDayOff) {
+      // 排休只需日期 + 餐段
+    } else if (!startTime || !endTime) {
+      errs.time = '请选择开始与结束时间'
+    } else if (startTime === endTime) {
+      errs.time = '起止时间不得相等'
+    }
+    if (!isEdit && employees.length === 0) errs.employee = '该门店暂无在职员工'
+    setFieldErrors(errs)
+    return Object.keys(errs).length === 0
+  }
+
+  const submit = async () => {
+    if (submitting || !validate()) return
+    setSubmitting(true)
     try {
-      const {error} = isEditMode
+      const {error} = isEdit
         ? await supabase.rpc('update_schedule', {
-            p_schedule_id: scheduleId,
-            p_shift_type: shiftTypeValues[shiftTypeIndex],
-            p_start_time: formData.start_time,
-            p_end_time: formData.end_time,
-            p_notes: formData.notes || null
+            p_schedule_id: editId,
+            p_shift_type: isDayOff ? 'day_off' : SEGMENT_VALUES[segmentIndex],
+            p_start_time: isDayOff ? null : startTime,
+            p_end_time: isDayOff ? null : endTime,
+            p_is_day_off: isDayOff,
+            p_meal_period: isDayOff ? MEAL_VALUES[mealIndex] : null,
+            p_notes: notes.trim() || null
           })
         : await supabase.rpc('publish_schedule', {
             p_employee_id: employees[employeeIndex].id,
-            p_schedule_date: formData.schedule_date,
-            p_shift_type: shiftTypeValues[shiftTypeIndex],
-            p_start_time: formData.start_time,
-            p_end_time: formData.end_time,
-            p_notes: formData.notes || null
+            p_schedule_date: date,
+            p_shift_type: isDayOff ? 'day_off' : SEGMENT_VALUES[segmentIndex],
+            p_start_time: isDayOff ? null : startTime,
+            p_end_time: isDayOff ? null : endTime,
+            p_is_day_off: isDayOff,
+            p_meal_period: isDayOff ? MEAL_VALUES[mealIndex] : null,
+            p_notes: notes.trim() || null
           })
 
       if (error) {
-        // 服务端权威拒绝（AUTH_DENIED/INVALID/CONFLICT）——透出真实原因
-        showToast({
-          title: error.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''),
-          icon: 'none',
-          duration: 3000
-        })
+        const msg = error.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, '')
+        setFieldErrors(mapServerError(msg))
+        showToast({title: msg.slice(0, 40), icon: 'none', duration: 3000})
         return
       }
-      showToast({title: isEditMode ? '更新成功，员工已收到通知' : '发布成功，员工已收到通知', icon: 'success'})
-      setTimeout(() => navigateBack(), 800)
-    } catch (error) {
-      console.error('操作失败:', error)
-      showToast({title: isEditMode ? '更新失败' : '发布失败', icon: 'none'})
+      showToast({title: isEdit ? '已修改，员工已收到通知' : '已发布，员工已收到通知', icon: 'success'})
+      setTimeout(() => navigateBack(), 1000)
+    } catch (e) {
+      console.error('提交失败:', e)
+      showToast({title: '提交失败，请重试', icon: 'none'})
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
-  if (!currentTenant) {
-    return null
-  }
+  const summaryLine = isDayOff
+    ? `${date || '未选日期'} · ${MEALS[mealIndex]}`
+    : `${date || '未选日期'}${startTime && endTime ? ` ${startTime}–${endTime}` : ' 未选时间'}`
 
   return (
-    <View className="min-h-screen bg-muted p-4">
-      <View className="bg-white rounded-lg p-4 border-2 border-gray-200 shadow-sm">
-        {/* 选择店铺 */}
-        <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">
-            选择店铺 <Text className="text-red-500">*</Text>
-          </Text>
-          {stores.length === 0 ? (
-            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50">
-              <Text className="text-muted-foreground">暂无店铺，请先添加店铺</Text>
-            </View>
-          ) : (
-            <Picker
-              mode="selector"
-              range={stores.map((s) => s.name)}
-              value={storeIndex}
-              onChange={(e) => handleStoreChange(Number(e.detail.value))}>
-              <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
-                <Text className="text-foreground">{stores[storeIndex]?.name || '请选择店铺'}</Text>
-                <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
+    <View className="min-h-screen bg-gray-50">
+      <TabHero title={isEdit ? '修改排班' : '创建排班'} subtitle="发布即为员工可见的正式班次" />
+      <View className="px-4 pb-8 -mt-9">
+        {loadError ? (
+          <View className="bg-white rounded-2xl shadow-sm p-5">
+            <Text className="text-sm text-danger-600">{loadError}</Text>
+          </View>
+        ) : (
+          <>
+            {/* 谁 */}
+            {!isEdit && (
+              <View className="bg-white rounded-2xl shadow-sm p-4 mb-3">
+                <Field label="谁在上班" required error={fieldErrors.employee}>
+                  <Picker
+                    mode="selector"
+                    range={stores.map((s) => s.name)}
+                    value={storeIndex}
+                    onChange={(e) => onStoreChange(Number(e.detail.value))}>
+                    <View className="w-full px-3 py-2.5 rounded-xl border border-gray-200 flex items-center justify-between">
+                      <Text className={stores[storeIndex] ? 'text-sm text-gray-800' : 'text-sm text-gray-400'}>
+                        {stores[storeIndex]?.name || '选择门店'}
+                      </Text>
+                      <View className="i-mdi-chevron-down text-gray-300" />
+                    </View>
+                  </Picker>
+                  <View className="h-2" />
+                  <Picker
+                    mode="selector"
+                    range={employees.map((e) => `${e.name}${e.position ? ` · ${e.position}` : ''}`)}
+                    value={employeeIndex}
+                    onChange={(e) => setEmployeeIndex(Number(e.detail.value))}>
+                    <View className="w-full px-3 py-2.5 rounded-xl border border-gray-200 flex items-center justify-between">
+                      <Text className={employees[employeeIndex] ? 'text-sm text-gray-800' : 'text-sm text-gray-400'}>
+                        {employees[employeeIndex]?.name || '选择员工'}
+                      </Text>
+                      <View className="i-mdi-chevron-down text-gray-300" />
+                    </View>
+                  </Picker>
+                </Field>
               </View>
-            </Picker>
-          )}
-        </View>
+            )}
 
-        {/* 选择员工 */}
-        <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">
-            选择员工 <Text className="text-red-500">*</Text>
-          </Text>
-          {employees.length === 0 ? (
-            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50">
-              <Text className="text-muted-foreground">该店铺暂无员工</Text>
+            {/* 哪一天 */}
+            <View className="bg-white rounded-2xl shadow-sm p-4 mb-3">
+              <Field label="哪一天" required error={fieldErrors.date}>
+                <Picker
+                  mode="date"
+                  value={date || undefined}
+                  disabled={isEdit}
+                  onChange={(e) => setDate(e.detail.value)}>
+                  <View className="w-full px-3 py-2.5 rounded-xl border border-gray-200 flex items-center justify-between">
+                    <Text className={date ? 'text-sm text-gray-800' : 'text-sm text-gray-400'}>
+                      {date || '选择日期'}
+                      {isEdit && '（不可修改）'}
+                    </Text>
+                    <View className="i-mdi-chevron-down text-gray-300" />
+                  </View>
+                </Picker>
+              </Field>
             </View>
-          ) : (
-            <Picker
-              mode="selector"
-              range={employees.map((e) => e.name)}
-              value={employeeIndex}
-              onChange={(e) => setEmployeeIndex(Number(e.detail.value))}>
-              <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
-                <Text className="text-foreground">{employees[employeeIndex]?.name || '请选择员工'}</Text>
-                <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
+
+            {/* 什么班段 */}
+            <View className="bg-white rounded-2xl shadow-sm p-4 mb-3">
+              <View className="flex gap-2 mb-3">
+                <View
+                  className={`flex-1 text-center py-2 rounded-lg ${!isDayOff ? 'bg-primary-500' : 'bg-gray-100'}`}
+                  onClick={() => setIsDayOff(false)}>
+                  <View className={`i-mdi-clock-outline text-base ${!isDayOff ? 'text-white' : 'text-gray-400'}`} />
+                  <Text className={`text-xs ${!isDayOff ? 'text-white' : 'text-gray-500'}`}>工作班</Text>
+                </View>
+                <View
+                  className={`flex-1 text-center py-2 rounded-lg ${isDayOff ? 'bg-success-500' : 'bg-gray-100'}`}
+                  onClick={() => setIsDayOff(true)}>
+                  <View className={`i-mdi-sleep text-base ${isDayOff ? 'text-white' : 'text-gray-400'}`} />
+                  <Text className={`text-xs ${isDayOff ? 'text-white' : 'text-gray-500'}`}>排休</Text>
+                </View>
               </View>
-            </Picker>
-          )}
-        </View>
 
-        {/* 排班日期（编辑模式不可改：update_schedule 语义为内容修改） */}
-        <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">
-            排班日期 <Text className="text-red-500">*</Text>
-          </Text>
-          <Picker
-            mode="date"
-            value={formData.schedule_date || undefined}
-            disabled={isEditMode}
-            onChange={(e) => setFormData({...formData, schedule_date: e.detail.value})}>
-            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
-              <Text className={formData.schedule_date ? 'text-foreground' : 'text-muted-foreground'}>
-                {formData.schedule_date || '请选择日期'}
+              {isDayOff ? (
+                <Field label="排休粒度">
+                  <Picker
+                    mode="selector"
+                    range={MEALS}
+                    value={mealIndex}
+                    onChange={(e) => setMealIndex(Number(e.detail.value))}>
+                    <View className="w-full px-3 py-2.5 rounded-xl border border-gray-200 flex items-center justify-between">
+                      <Text className="text-sm text-gray-800">{MEALS[mealIndex]}</Text>
+                      <View className="i-mdi-chevron-down text-gray-300" />
+                    </View>
+                  </Picker>
+                  <Text className="text-2xs text-gray-400 mt-1.5">
+                    餐段排休会与同餐段时间窗内的班次互相冲突（服务端裁决）
+                  </Text>
+                </Field>
+              ) : (
+                <>
+                  <Field label="班段类型">
+                    <Picker
+                      mode="selector"
+                      range={SEGMENTS}
+                      value={segmentIndex}
+                      onChange={(e) => applySegment(Number(e.detail.value))}>
+                      <View className="w-full px-3 py-2.5 rounded-xl border border-gray-200 flex items-center justify-between">
+                        <Text className="text-sm text-gray-800">{SEGMENTS[segmentIndex]}</Text>
+                        <View className="i-mdi-chevron-down text-gray-300" />
+                      </View>
+                    </Picker>
+                    <Text className="text-2xs text-gray-400 mt-1.5">
+                      选择常用班段自动带出时间，可再调整；自定义则手动选择
+                    </Text>
+                  </Field>
+                  <View className="h-3" />
+                  <Field label="起止时间" required error={fieldErrors.time}>
+                    <View className="flex items-center gap-2">
+                      <Picker mode="time" value={startTime || undefined} onChange={(e) => setStartTime(e.detail.value)}>
+                        <View className="px-3 py-2.5 rounded-xl border border-gray-200">
+                          <Text className={startTime ? 'text-sm text-gray-800' : 'text-sm text-gray-400'}>
+                            {startTime || '开始'}
+                          </Text>
+                        </View>
+                      </Picker>
+                      <Text className="text-gray-300">–</Text>
+                      <Picker mode="time" value={endTime || undefined} onChange={(e) => setEndTime(e.detail.value)}>
+                        <View className="px-3 py-2.5 rounded-xl border border-gray-200">
+                          <Text className={endTime ? 'text-sm text-gray-800' : 'text-sm text-gray-400'}>
+                            {endTime || '结束'}
+                          </Text>
+                        </View>
+                      </Picker>
+                    </View>
+                    <Text className="text-2xs text-gray-400 mt-1.5">
+                      结束早于开始视为跨天班；与其他班次端点相接（如 13:00–17:00 接 17:00）合法
+                    </Text>
+                  </Field>
+                </>
+              )}
+            </View>
+
+            {/* 备注 */}
+            <View className="bg-white rounded-2xl shadow-sm p-4 mb-4">
+              <Field label="备注（可选）">
+                <View style={{overflow: 'hidden'}}>
+                  <Textarea
+                    className="bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 w-full text-sm"
+                    placeholder="员工将在通知中看到"
+                    value={notes}
+                    onInput={(e) => setNotes(e.detail.value)}
+                    maxlength={100}
+                    style={{minHeight: '72px'}}
+                  />
+                </View>
+              </Field>
+            </View>
+
+            {/* 摘要与发布 */}
+            <View className="bg-primary-50 rounded-2xl p-4 mb-3 flex items-center gap-2">
+              <View className="i-mdi-bullhorn-outline text-lg text-primary-500" />
+              <Text className="text-xs text-gray-600 flex-1">
+                即将{isEdit ? '修改' : '发布'}：{employees[employeeIndex]?.name || '员工'} · {summaryLine}
               </Text>
-              <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
             </View>
-          </Picker>
-        </View>
-
-        {/* 班次类型 */}
-        <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">
-            班次类型 <Text className="text-red-500">*</Text>
-          </Text>
-          <Picker
-            mode="selector"
-            range={shiftTypes}
-            value={shiftTypeIndex}
-            onChange={(e) => setShiftTypeIndex(Number(e.detail.value))}>
-            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
-              <Text className="text-foreground">{shiftTypes[shiftTypeIndex]}</Text>
-              <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
+            <View className="flex gap-3">
+              <View
+                className="flex-1 bg-white rounded-xl py-3 text-center border border-gray-200 active:opacity-70"
+                onClick={() => navigateBack()}>
+                <Text className="text-sm text-gray-600">取消</Text>
+              </View>
+              <View
+                className={`flex-1 rounded-xl py-3 text-center ${submitting ? 'bg-gray-200' : 'bg-primary-500 active:opacity-80'}`}
+                onClick={submit}>
+                <Text className={`text-sm ${submitting ? 'text-gray-400' : 'text-white'}`}>
+                  {submitting ? '服务端校验中…' : isEdit ? '保存修改' : '发布排班'}
+                </Text>
+              </View>
             </View>
-          </Picker>
-        </View>
-
-        {/* 开始时间 */}
-        <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">
-            开始时间 <Text className="text-red-500">*</Text>
-          </Text>
-          <Picker
-            mode="time"
-            value={formData.start_time || undefined}
-            onChange={(e) => setFormData({...formData, start_time: e.detail.value})}>
-            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
-              <Text className={formData.start_time ? 'text-foreground' : 'text-muted-foreground'}>
-                {formData.start_time || '请选择开始时间'}
-              </Text>
-              <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
-            </View>
-          </Picker>
-        </View>
-
-        {/* 结束时间 */}
-        <View className="mb-4">
-          <Text className="text-sm text-foreground block mb-2">
-            结束时间 <Text className="text-red-500">*</Text>
-          </Text>
-          <Picker
-            mode="time"
-            value={formData.end_time || undefined}
-            onChange={(e) => setFormData({...formData, end_time: e.detail.value})}>
-            <View className="w-full px-4 py-3 border border-gray-200 rounded-xl flex items-center justify-between">
-              <Text className={formData.end_time ? 'text-foreground' : 'text-muted-foreground'}>
-                {formData.end_time || '请选择结束时间（晚于开始则跨天班）'}
-              </Text>
-              <View className="i-mdi-chevron-down text-xl text-muted-foreground"></View>
-            </View>
-          </Picker>
-        </View>
-
-        {/* 备注 */}
-        <View className="mb-6">
-          <Text className="text-sm text-foreground block mb-2">备注</Text>
-          <Input
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl"
-            placeholder="请输入备注信息"
-            value={formData.notes}
-            onInput={(e) => setFormData({...formData, notes: e.detail.value})}
-          />
-        </View>
-
-        {/* 提交按钮 */}
-        <View className="flex gap-3">
-          <Button
-            className="flex-1 bg-muted text-foreground rounded-xl text-sm break-keep"
-            size="default"
-            onClick={() => navigateBack()}>
-            取消
-          </Button>
-          <Button
-            className="flex-1 bg-blue-100 text-white rounded-xl text-sm break-keep"
-            size="default"
-            loading={loading}
-            disabled={loading || stores.length === 0 || employees.length === 0}
-            onClick={handleSubmit}>
-            {loading ? '提交中...' : isEditMode ? '确认更新' : '确认创建'}
-          </Button>
-        </View>
+          </>
+        )}
       </View>
     </View>
   )

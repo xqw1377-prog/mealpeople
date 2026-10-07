@@ -27,7 +27,10 @@ export async function getSchedulesByTenantId(
     storeId?: string
   }
 ): Promise<Schedule[]> {
-  let query = supabase.from('schedules').select('*, employees(name), stores(name)').eq('tenant_id', tenantId)
+  let query = supabase
+    .from('schedules')
+    .select('*, employees!schedules_employee_id_fkey(name), stores!schedules_store_id_fkey(name)')
+    .eq('tenant_id', tenantId)
 
   if (options?.startDate) {
     query = query.gte('schedule_date', options.startDate)
@@ -58,7 +61,7 @@ export async function getSchedulesByStoreId(
     endDate?: string
   }
 ): Promise<Schedule[]> {
-  let query = supabase.from('schedules').select('*, employees(name)').eq('store_id', storeId)
+  let query = supabase.from('schedules').select('*, employees!schedules_employee_id_fkey(name)').eq('store_id', storeId)
 
   if (options?.startDate) {
     query = query.gte('schedule_date', options.startDate)
@@ -82,7 +85,7 @@ export async function getSchedulesByStoreId(
 export async function getScheduleById(id: string): Promise<Schedule | null> {
   const {data, error} = await supabase
     .from('schedules')
-    .select('*, employees(name), stores(name)')
+    .select('*, employees!schedules_employee_id_fkey(name), stores!schedules_store_id_fkey(name)')
     .eq('id', id)
     .maybeSingle()
 

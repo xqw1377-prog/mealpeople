@@ -1,17 +1,31 @@
 /**
- * 换班记录页面
- * P2-S1-A cutover：
- * - 列表直查 shift_swap_requests（RLS：员工见自己的，管理者见本店/本租户的）
- * - 班次详情来自 schedules 真实数据（embed，替换原「待实现」占位）
- * - 员工撤回 → cancel_schedule_swap；管理者审批 → review_schedule_swap
- * - 冲突与否由服务端在审批事务内裁决，UI 只解释结果
+ * 换班记录与审批 · P2-S1-B 重设计
+ * 员工：自己的申请/撤回；管理者：审批（通过并交换 / 拒绝）
+ * 审批卡直呈「张三 ⇅ 李四」班次对照；服务端冲突结论内联解释，不 toast 完事
+ * 数据：shift_swap_requests（RLS 定可见性）+ get_swap_shift_brief 最小补齐
+ * DS：TabHero / StatsStrip / ErrorBanner / tokens
  */
 
 import {ScrollView, Text, View} from '@tarojs/components'
-import Taro, {useDidShow} from '@tarojs/taro'
+import {showModal, showToast, useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import {useCallback, useState} from 'react'
 import {supabase} from '@/client/supabase'
+import {ErrorBanner, StatsStrip, TabHero} from '@/components/ds'
+
+interface ShiftBrief {
+  schedule_id: string
+  employee_name: string
+  schedule_date: string
+  start_time: string | null
+  end_time: string | null
+}
+
+interface ShiftDisplay {
+  schedule_date: string
+  start_time: string | null
+  end_time: string | null
+}
 
 interface SwapRow {
   id: string
@@ -23,59 +37,56 @@ interface SwapRow {
   target_id: string
   requester: {name: string} | null
   target: {name: string} | null
-  requester_shift: {schedule_date: string; start_time: string | null; end_time: string | null} | null
-  target_shift: {schedule_date: string; start_time: string | null; end_time: string | null} | null
+  requester_shift: ShiftDisplay | null
+  target_shift: ShiftDisplay | null
 }
 
-interface SwapDisplay extends SwapRow {
+interface DisplayRow extends SwapRow {
   statusName: string
-  statusColor: string
+  statusTone: string
   statusIcon: string
+  actionError: string | null
 }
 
-const fmtShift = (s: SwapRow['requester_shift']) =>
-  s
-    ? `${String(s.schedule_date).slice(5)} ${(s.start_time || '').slice(0, 5)}-${(s.end_time || '').slice(0, 5)}`
+const fmtDate = (s?: string) => (s ? s.slice(5).replace('-', '月 ') + '日' : '')
+const fmtShift = (s?: ShiftDisplay | null) =>
+  s && s.start_time
+    ? `${fmtDate(s.schedule_date)} ${(s.start_time || '').slice(0, 5)}–${(s.end_time || '').slice(0, 5)}`
     : '班次已不可用'
+
+const STATUS: Record<string, {name: string; tone: string; icon: string}> = {
+  pending: {name: '待审批', tone: 'text-warning-600 bg-warning-50', icon: 'i-mdi-clock-outline'},
+  approved: {name: '已通过', tone: 'text-success-600 bg-success-50', icon: 'i-mdi-check-circle'},
+  rejected: {name: '已拒绝', tone: 'text-danger-600 bg-danger-50', icon: 'i-mdi-close-circle'},
+  cancelled: {name: '已撤回', tone: 'text-gray-500 bg-gray-100', icon: 'i-mdi-cancel'}
+}
 
 const SwapRecords: React.FC = () => {
   const {user} = useAuth({guard: true})
-  const [loading, setLoading] = useState(false)
-  const [requests, setRequests] = useState<SwapDisplay[]>([])
-  const [myEmployeeIds, setMyEmployeeIds] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [rows, setRows] = useState<DisplayRow[]>([])
+  const [myIds, setMyIds] = useState<string[]>([])
   const [acting, setActing] = useState('')
-  const [filterStatus, setFilterStatus] = useState('all')
+  const [filter, setFilter] = useState('all')
 
-  const getStatusInfo = useCallback((status: string) => {
-    const statusMap: Record<string, {name: string; color: string; icon: string}> = {
-      pending: {name: '待审批', color: 'text-muted-foreground', icon: 'i-mdi-clock-outline'},
-      approved: {name: '已通过', color: 'text-muted-foreground', icon: 'i-mdi-check-circle'},
-      rejected: {name: '已拒绝', color: 'text-red-600', icon: 'i-mdi-close-circle'},
-      cancelled: {name: '已取消', color: 'text-muted-foreground', icon: 'i-mdi-cancel'}
-    }
-    return statusMap[status] || {name: '未知', color: 'text-muted-foreground', icon: 'i-mdi-help-circle'}
-  }, [])
-
-  const loadSwapRecords = useCallback(async () => {
+  const load = useCallback(async () => {
     if (!user?.id) return
+    setLoading(true)
+    setError(null)
     try {
-      setLoading(true)
-      const {data: empRows, error: empErr} = await supabase
+      const {data: empRows} = await supabase
         .from('employees')
         .select('id')
         .eq('user_id', user.id)
         .eq('status', 'active')
-      if (empErr) throw empErr
-      const empIds = (empRows || []).map((e: {id: string}) => e.id)
-      setMyEmployeeIds(empIds)
+      const ids = (empRows || []).map((e: {id: string}) => e.id)
+      setMyIds(ids)
 
-      // RLS 决定可见性：自己的申请 + （管理者）本店/本租户全部
-      // 双 FK 同表 → 别名 + !约束名 消歧（PGRST200）
-      const {data: rows, error} = await supabase
+      const {data, error: qErr} = await supabase
         .from('shift_swap_requests')
         .select(
-          'id, status, reason, review_notes, created_at, requester_id, target_id, ' +
-            'requester_shift_id, target_shift_id, ' +
+          'id, status, reason, review_notes, created_at, requester_id, target_id, requester_shift_id, target_shift_id, ' +
             'requester:employees!shift_swap_requests_requester_id_fkey(name), ' +
             'target:employees!shift_swap_requests_target_id_fkey(name), ' +
             'requester_shift:schedules!shift_swap_requests_requester_shift_fkey(schedule_date, start_time, end_time), ' +
@@ -83,275 +94,230 @@ const SwapRecords: React.FC = () => {
         )
         .order('created_at', {ascending: false})
         .limit(100)
-      if (error) throw error
-      const list = (rows || []) as unknown as (SwapRow & {requester_shift_id?: string; target_shift_id?: string})[]
+      if (qErr) throw qErr
 
-      // P2-S1-A-R1：schedules 表级 RLS 收紧后，员工侧同事班次的 embed 会被过滤为 null
-      // → 用专用最小读 RPC get_swap_shift_brief 补齐（仅日期/起止，无内部字段）
-      const briefCache = new Map<
-        string,
-        {schedule_date: string; start_time: string | null; end_time: string | null} | null
-      >()
-      const fetchBrief = async (sid?: string) => {
+      // 员工侧同事班次 embed 被 RLS 过滤 → brief RPC 最小补齐（swap-context 绑定）
+      const briefCache = new Map<string, ShiftDisplay | null>()
+      const briefOf = async (sid?: string) => {
         if (!sid) return null
         if (briefCache.has(sid)) return briefCache.get(sid) ?? null
-        const {data} = await supabase.rpc('get_swap_shift_brief', {p_schedule_id: sid})
-        const brief =
-          ((data as unknown as {schedule_date: string; start_time: string; end_time: string}[] | null) || [])[0] || null
-        briefCache.set(sid, brief)
-        return brief
+        const {data: b} = await supabase.rpc('get_swap_shift_brief', {p_schedule_id: sid})
+        const row = ((b as unknown as ShiftBrief[] | null) || [])[0] || null
+        const v: ShiftDisplay | null = row
+          ? {schedule_date: String(row.schedule_date).slice(0, 10), start_time: row.start_time, end_time: row.end_time}
+          : null
+        briefCache.set(sid, v)
+        return v
       }
+      const list = (data || []) as unknown as (SwapRow & {requester_shift_id?: string; target_shift_id?: string})[]
       for (const r of list) {
-        if (!r.requester_shift) r.requester_shift = await fetchBrief(r.requester_shift_id)
-        if (!r.target_shift) r.target_shift = await fetchBrief(r.target_shift_id)
+        if (!r.requester_shift) r.requester_shift = await briefOf(r.requester_shift_id)
+        if (!r.target_shift) r.target_shift = await briefOf(r.target_shift_id)
       }
 
-      setRequests(
+      setRows(
         list.map((r) => {
-          const info = getStatusInfo(r.status)
-          return {...r, statusName: info.name, statusColor: info.color, statusIcon: info.icon}
+          const s = STATUS[r.status] || STATUS.pending
+          return {...r, statusName: s.name, statusTone: s.tone, statusIcon: s.icon, actionError: null}
         })
       )
-    } catch (e: unknown) {
+    } catch (e) {
       console.error('加载换班记录失败:', e)
-      Taro.showToast({title: '加载失败，请重试', icon: 'none'})
+      setError('加载失败，请重试')
     } finally {
       setLoading(false)
     }
-  }, [user?.id, getStatusInfo])
+  }, [user?.id])
 
   useDidShow(() => {
-    loadSwapRecords()
+    load()
   })
 
-  // 员工撤回自己的 pending（command：仅 requester 本人）
-  const handleCancel = async (requestId: string) => {
-    const result = await Taro.showModal({
-      title: '确认撤回',
-      content: '确定要撤回这个换班申请吗？',
+  const setRowError = (id: string, msg: string | null) =>
+    setRows((prev) => prev.map((r) => (r.id === id ? {...r, actionError: msg} : r)))
+
+  const handleCancel = async (id: string) => {
+    if (acting) return
+    const res = await showModal({
+      title: '撤回申请',
+      content: '确定撤回这条换班申请吗？',
       confirmText: '撤回',
       cancelText: '保留'
     })
-    if (!result.confirm || acting) return
+    if (!res.confirm) return
     try {
-      setActing(requestId)
-      const {error} = await supabase.rpc('cancel_schedule_swap', {p_request_id: requestId})
-      if (error) {
-        Taro.showToast({title: error.message, icon: 'none', duration: 3000})
+      setActing(id)
+      const {error: e} = await supabase.rpc('cancel_schedule_swap', {p_request_id: id})
+      if (e) {
+        setRowError(id, e.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''))
         return
       }
-      Taro.showToast({title: '已撤回', icon: 'success'})
-      loadSwapRecords()
+      showToast({title: '已撤回', icon: 'success'})
+      load()
     } finally {
       setActing('')
     }
   }
 
-  // 管理者审批（command：服务端事务内做双方冲突校验）
-  const handleReview = async (requestId: string, approve: boolean) => {
+  const handleReview = async (id: string, approve: boolean) => {
     if (acting) return
-    const result = await Taro.showModal({
+    const res = await showModal({
       title: approve ? '通过换班' : '拒绝换班',
-      content: approve ? '通过后两位员工的班次将自动交换（服务端将校验交换后是否冲突）' : '确定拒绝该换班申请吗？',
+      content: approve ? '通过后双方班次自动交换；服务端将校验交换后是否冲突' : '确定拒绝该申请吗？',
       confirmText: approve ? '通过' : '拒绝',
       cancelText: '再想想'
     })
-    if (!result.confirm) return
+    if (!res.confirm) return
     try {
-      setActing(requestId)
-      const {error} = await supabase.rpc('review_schedule_swap', {
-        p_request_id: requestId,
+      setActing(id)
+      const {error: e} = await supabase.rpc('review_schedule_swap', {
+        p_request_id: id,
         p_approve: approve,
         p_review_notes: null
       })
-      if (error) {
-        // CONFLICT/INVALID/AUTH 原因透出
-        Taro.showToast({
-          title: error.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''),
-          icon: 'none',
-          duration: 3000
-        })
+      if (e) {
+        setRowError(id, e.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''))
         return
       }
-      Taro.showToast({title: approve ? '已通过，班次已交换' : '已拒绝', icon: 'success'})
-      loadSwapRecords()
+      showToast({title: approve ? '已通过，班次已交换' : '已拒绝', icon: 'success'})
+      load()
     } finally {
       setActing('')
     }
   }
 
-  const filteredRequests = filterStatus === 'all' ? requests : requests.filter((r) => r.status === filterStatus)
-  const pendingCount = requests.filter((r) => r.status === 'pending').length
-  const isMyRequest = (r: SwapDisplay) => myEmployeeIds.includes(r.requester_id)
+  const isMine = (r: DisplayRow) => myIds.includes(r.requester_id)
+  const filtered = filter === 'all' ? rows : rows.filter((r) => r.status === filter)
+  const pending = rows.filter((r) => r.status === 'pending').length
+  const approved = rows.filter((r) => r.status === 'approved').length
+  const rejected = rows.filter((r) => r.status === 'rejected').length
+
+  const personBlock = (name: string, shiftText: string) => (
+    <View className="flex-1">
+      <View className="flex items-center gap-1">
+        <View className="i-mdi-account-outline text-sm text-gray-400" />
+        <Text className="text-xs font-medium text-gray-600">{name}</Text>
+      </View>
+      <Text className="text-sm font-semibold mt-1 text-gray-800">{shiftText}</Text>
+    </View>
+  )
 
   return (
     <View className="min-h-screen bg-gray-50">
+      <TabHero title="换班" subtitle="记录与审批 · 冲突由服务端裁决" />
       <ScrollView scrollY className="h-screen box-border bg-transparent">
-        <View className="p-4 space-y-4">
-          {loading ? (
-            <View className="bg-white rounded-lg p-8 border-2 border-gray-200 shadow-sm">
-              <Text className="text-center text-muted-foreground">加载中...</Text>
+        <View className="px-4 pb-8 -mt-9">
+          <StatsStrip
+            items={[
+              {value: rows.length, label: '全部'},
+              {value: pending, label: '待审批', valueClass: pending > 0 ? 'text-warning-600' : ''},
+              {value: approved, label: '已通过', valueClass: 'text-success-600'},
+              {value: rejected, label: '已拒绝', valueClass: 'text-danger-600'}
+            ]}
+          />
+
+          <View className="mt-3 flex gap-2">
+            {[
+              {k: 'all', label: '全部'},
+              {k: 'pending', label: '待审批'},
+              {k: 'approved', label: '已通过'},
+              {k: 'rejected', label: '已拒绝'}
+            ].map((f) => (
+              <View
+                key={f.k}
+                className={`flex-1 text-center py-1.5 rounded-lg ${filter === f.k ? 'bg-primary-500' : 'bg-white'}`}
+                onClick={() => setFilter(f.k)}>
+                <Text className={`text-xs ${filter === f.k ? 'text-white' : 'text-gray-500'}`}>{f.label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {error && (
+            <View className="mt-3">
+              <ErrorBanner message={error} onRetry={load} />
             </View>
-          ) : (
-            <>
-              {/* 统计卡片 */}
-              <View className="bg-blue-100 rounded-lg p-6">
-                <View className="flex flex-row items-center justify-between mb-4">
-                  <Text className="text-foreground text-lg font-bold">换班统计</Text>
-                  <View className="i-mdi-chart-box text-2xl text-blue-600" />
-                </View>
-                <View className="grid grid-cols-4 gap-2">
-                  <View className="text-center">
-                    <Text className="text-blue-600/80 text-xs">总申请</Text>
-                    <Text className="text-foreground text-2xl font-bold mt-1">{requests.length}</Text>
-                  </View>
-                  <View className="text-center">
-                    <Text className="text-blue-600/80 text-xs">待审批</Text>
-                    <Text className="text-foreground text-2xl font-bold mt-1">{pendingCount}</Text>
-                  </View>
-                  <View className="text-center">
-                    <Text className="text-blue-600/80 text-xs">已通过</Text>
-                    <Text className="text-foreground text-2xl font-bold mt-1">
-                      {requests.filter((r) => r.status === 'approved').length}
-                    </Text>
-                  </View>
-                  <View className="text-center">
-                    <Text className="text-blue-600/80 text-xs">已拒绝</Text>
-                    <Text className="text-foreground text-2xl font-bold mt-1">
-                      {requests.filter((r) => r.status === 'rejected').length}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* 筛选按钮 */}
-              <View className="bg-white rounded-lg p-4 border-2 border-gray-200 shadow-sm">
-                <View className="flex flex-row items-center gap-2">
-                  {[
-                    {k: 'all', label: '全部'},
-                    {k: 'pending', label: '待审批'},
-                    {k: 'approved', label: '已通过'},
-                    {k: 'rejected', label: '已拒绝'}
-                  ].map((f) => (
-                    <View
-                      key={f.k}
-                      className={`flex-1 text-center py-2 rounded-lg ${
-                        filterStatus === f.k ? 'bg-green-500' : 'bg-gray-50/30'
-                      }`}
-                      onClick={() => setFilterStatus(f.k)}>
-                      <Text className={`text-sm ${filterStatus === f.k ? 'text-white' : 'text-foreground'}`}>
-                        {f.label}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              {/* 列表 */}
-              <View className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
-                <View className="flex flex-row items-center justify-between mb-4">
-                  <Text className="text-lg font-semibold text-foreground">换班记录</Text>
-                  <View className="i-mdi-history text-2xl text-blue-600" />
-                </View>
-
-                {filteredRequests.length === 0 ? (
-                  <View className="text-center py-8">
-                    <View className="i-mdi-file-document-outline text-5xl text-muted-foreground mb-2" />
-                    <Text className="text-muted-foreground">暂无换班记录</Text>
-                  </View>
-                ) : (
-                  <View className="space-y-3">
-                    {filteredRequests.map((request) => (
-                      <View key={request.id} className="rounded-xl p-4 bg-gray-50/30 border border-border">
-                        <View className="flex flex-row items-center justify-between mb-3">
-                          <View className="flex flex-row items-center">
-                            <View className={`${request.statusIcon} text-xl ${request.statusColor} mr-2`} />
-                            <Text className={`text-sm font-bold ${request.statusColor}`}>{request.statusName}</Text>
-                          </View>
-                          <Text className="text-xs text-muted-foreground">
-                            {new Date(request.created_at).toLocaleDateString()}
-                          </Text>
-                        </View>
-
-                        <View className="space-y-2">
-                          <View className="flex flex-row items-start">
-                            <View className="i-mdi-calendar-export text-base text-blue-600 mr-2 mt-0.5" />
-                            <View className="flex-1">
-                              <Text className="text-xs text-muted-foreground">
-                                {request.requester?.name || '发起人'} · 让出班次
-                              </Text>
-                              <Text className="text-sm text-foreground">{fmtShift(request.requester_shift)}</Text>
-                            </View>
-                          </View>
-
-                          <View className="flex flex-row items-start">
-                            <View className="i-mdi-calendar-import text-base text-accent mr-2 mt-0.5" />
-                            <View className="flex-1">
-                              <Text className="text-xs text-muted-foreground">
-                                {request.target?.name || '目标同事'} · 接手班次
-                              </Text>
-                              <Text className="text-sm text-foreground">{fmtShift(request.target_shift)}</Text>
-                            </View>
-                          </View>
-
-                          {request.reason && (
-                            <View className="flex flex-row items-start">
-                              <View className="i-mdi-text-box text-base text-muted-foreground mr-2 mt-0.5" />
-                              <View className="flex-1">
-                                <Text className="text-xs text-muted-foreground">换班原因</Text>
-                                <Text className="text-sm text-foreground">{request.reason}</Text>
-                              </View>
-                            </View>
-                          )}
-
-                          {request.review_notes && (
-                            <View className="flex flex-row items-start">
-                              <View className="i-mdi-comment-text text-base text-muted-foreground mr-2 mt-0.5" />
-                              <View className="flex-1">
-                                <Text className="text-xs text-muted-foreground">审批备注</Text>
-                                <Text className="text-sm text-foreground">{request.review_notes}</Text>
-                              </View>
-                            </View>
-                          )}
-                        </View>
-
-                        {/* 操作：员工撤回自己的；管理者审批（非本人申请） */}
-                        {request.status === 'pending' && (
-                          <View className="mt-3 pt-3 border-t border-border flex flex-row gap-2">
-                            {isMyRequest(request) && (
-                              <View
-                                className="flex-1 text-center py-2 bg-blue-100 rounded-lg active:opacity-70"
-                                onClick={() => handleCancel(request.id)}>
-                                <Text className="text-sm text-red-600">
-                                  {acting === request.id ? '处理中...' : '撤回申请'}
-                                </Text>
-                              </View>
-                            )}
-                            {!isMyRequest(request) && (
-                              <>
-                                <View
-                                  className="flex-1 text-center py-2 bg-green-500 rounded-lg active:opacity-70"
-                                  onClick={() => handleReview(request.id, true)}>
-                                  <Text className="text-sm text-white">
-                                    {acting === request.id ? '校验中...' : '通过并交换'}
-                                  </Text>
-                                </View>
-                                <View
-                                  className="flex-1 text-center py-2 bg-blue-100 rounded-lg active:opacity-70"
-                                  onClick={() => handleReview(request.id, false)}>
-                                  <Text className="text-sm text-red-600">拒绝</Text>
-                                </View>
-                              </>
-                            )}
-                          </View>
-                        )}
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </View>
-            </>
           )}
+
+          <View className="mt-3 space-y-3">
+            {loading ? (
+              [0, 1].map((i) => <View key={i} className="bg-white rounded-2xl shadow-sm h-36 animate-pulse" />)
+            ) : filtered.length === 0 ? (
+              <View className="bg-white rounded-2xl shadow-sm py-12 flex flex-col items-center">
+                <View className="i-mdi-swap-horizontal-off text-5xl text-gray-200" />
+                <Text className="mt-2 text-sm text-gray-400">
+                  {filter === 'pending' ? '暂无待审批的换班申请' : '暂无换班记录'}
+                </Text>
+                <Text className="mt-1 text-xs text-gray-300">员工可在「我的班次」发起换班</Text>
+              </View>
+            ) : (
+              filtered.map((r) => (
+                <View key={r.id} className="bg-white rounded-2xl shadow-sm p-4">
+                  <View className="flex items-center justify-between mb-3">
+                    <View className={`px-2.5 py-1 rounded-full flex items-center gap-1 ${r.statusTone}`}>
+                      <View className={`${r.statusIcon} text-sm`} />
+                      <Text className="text-xs font-medium">{r.statusName}</Text>
+                    </View>
+                    <Text className="text-xs text-gray-400">{new Date(r.created_at).toLocaleDateString()}</Text>
+                  </View>
+
+                  {/* 交换对照：张三 ⇅ 李四 */}
+                  <View className="bg-gray-50 rounded-xl p-3 flex items-center">
+                    {personBlock(r.requester?.name || '发起人', fmtShift(r.requester_shift))}
+                    <View className="mx-2 i-mdi-swap-vertical text-2xl text-primary-400" />
+                    {personBlock(r.target?.name || '同事', fmtShift(r.target_shift))}
+                  </View>
+
+                  {r.reason && (
+                    <View className="mt-2 flex items-start gap-1.5">
+                      <View className="i-mdi-text-box-outline text-sm text-gray-300 mt-0.5" />
+                      <Text className="text-xs text-gray-500 flex-1">{r.reason}</Text>
+                    </View>
+                  )}
+                  {r.review_notes && (
+                    <View className="mt-1 flex items-start gap-1.5">
+                      <View className="i-mdi-comment-text-outline text-sm text-gray-300 mt-0.5" />
+                      <Text className="text-xs text-gray-500 flex-1">审批备注：{r.review_notes}</Text>
+                    </View>
+                  )}
+
+                  {r.actionError && (
+                    <View className="mt-2 bg-danger-50 rounded-lg p-2.5 flex items-start gap-1.5">
+                      <View className="i-mdi-alert-circle-outline text-sm text-danger-500 mt-0.5" />
+                      <Text className="text-xs text-danger-600 flex-1">{r.actionError}</Text>
+                    </View>
+                  )}
+
+                  {r.status === 'pending' && (
+                    <View className="mt-3 pt-3 border-t border-gray-100 flex gap-2">
+                      {isMine(r) && (
+                        <View
+                          className="flex-1 text-center py-2 rounded-lg bg-gray-100 active:opacity-70"
+                          onClick={() => handleCancel(r.id)}>
+                          <Text className="text-xs text-gray-600">{acting === r.id ? '处理中…' : '撤回申请'}</Text>
+                        </View>
+                      )}
+                      {!isMine(r) && (
+                        <>
+                          <View
+                            className="flex-1 text-center py-2 rounded-lg bg-success-500 active:opacity-80"
+                            onClick={() => handleReview(r.id, true)}>
+                            <Text className="text-xs text-white">
+                              {acting === r.id ? '服务端校验中…' : '通过并交换'}
+                            </Text>
+                          </View>
+                          <View
+                            className="flex-1 text-center py-2 rounded-lg bg-gray-100 active:opacity-70"
+                            onClick={() => handleReview(r.id, false)}>
+                            <Text className="text-xs text-danger-600">拒绝</Text>
+                          </View>
+                        </>
+                      )}
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
+          </View>
         </View>
       </ScrollView>
     </View>
