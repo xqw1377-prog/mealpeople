@@ -5,7 +5,7 @@
 
 ## 架构（live 状态）
 
-**五个 command RPC**（public schema，PostgREST 可达，仅 authenticated EXECUTE）：
+**五个 command RPC**（public schema，PostgREST 可达；EXECUTE = owner + authenticated + service_role（平台默认），无 PUBLIC/anon）：
 
 ```text
 publish_schedule / update_schedule / cancel_schedule
