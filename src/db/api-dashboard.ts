@@ -247,10 +247,12 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     new_employees_this_month: 12,
 
     // 考勤统计
-    today_attendance_rate: 96.5,
-    this_week_attendance_rate: 94.8,
-    late_count_today: 3,
-    absent_count_today: 2,
+    // AD7 诚实展示：考勤域数据未接通（work_attendance 经 A2 command 才有真数据；
+    // dashboard 聚合层属 ATT UI 阶段），期间为 null 而非 0 —— 0 仍是伪造事实
+    today_attendance_rate: null,
+    this_week_attendance_rate: null,
+    late_count_today: null,
+    absent_count_today: null,
 
     // 请假统计
     pending_leave_count: 5,

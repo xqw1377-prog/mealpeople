@@ -94,10 +94,11 @@ export interface DashboardStats {
   new_employees_this_month: number
 
   // 考勤统计
-  today_attendance_rate: number
-  this_week_attendance_rate: number
-  late_count_today: number
-  absent_count_today: number
+  // AD7 诚实展示：考勤真数据未接通前为 null（UI 显示 -- / 暂无数据，不以 0 冒充）
+  today_attendance_rate: number | null
+  this_week_attendance_rate: number | null
+  late_count_today: number | null
+  absent_count_today: number | null
 
   // 请假统计
   pending_leave_count: number

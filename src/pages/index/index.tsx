@@ -224,19 +224,19 @@ const EmployeeWorkspace: React.FC = () => {
         />
         {loadError && <ErrorBanner message={loadError} onRetry={loadEmployee} />}
 
-        {/* 今日概况条（DS；首载骨架） */}
+        {/* 今日概况条（DS；首载骨架）· AD7 诚实展示：考勤真数据未接通前不显示伪事实 */}
         <StatsStrip
           className={firstLoading ? 'animate-pulse' : ''}
           items={[
             {
-              value: '待查询',
+              value: '--',
               label: '今日班次',
               valueClass: 'text-sm font-semibold',
               onClick: () => Taro.navigateTo({url: '/packageB/pages/scheduling/index'})
             },
             {
-              value: '未打卡',
-              label: '打卡状态',
+              value: '暂无数据',
+              label: '考勤状态',
               valueClass: 'text-sm font-semibold',
               onClick: () => Taro.navigateTo({url: '/packageG/pages/working/attendance/index'})
             },

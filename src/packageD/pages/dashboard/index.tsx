@@ -235,10 +235,10 @@ const Dashboard: React.FC = () => {
                           </View>
                         </View>
                         <Text className="text-2xl font-bold text-foreground mb-2">
-                          {dashboardData.stats.today_attendance_rate}%
+                          {dashboardData.stats.today_attendance_rate == null ? '--' : dashboardData.stats.today_attendance_rate + '%'}
                         </Text>
                         <Text className="text-xs text-muted-foreground leading-tight">
-                          迟到 {dashboardData.stats.late_count_today} 人
+                          {dashboardData.stats.late_count_today == null ? '迟到 暂无数据' : '迟到 ' + dashboardData.stats.late_count_today + ' 人'}
                         </Text>
                       </View>
                     </View>
