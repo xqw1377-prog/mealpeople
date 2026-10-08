@@ -348,15 +348,8 @@ export async function getTodoList(): Promise<DashboardTodoItem[]> {
 export async function getTeamActivities(limit = 20): Promise<DashboardTeamActivity[]> {
   // 示例数据
   const activities: DashboardTeamActivity[] = [
-    {
-      id: '1',
-      type: 'attendance',
-      title: '考勤打卡',
-      description: '张三完成今日打卡',
-      employee_name: '张三',
-      employee_id: 'emp001',
-      created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString()
-    },
+    // AD7（Honesty-R1）：不再人工生成 attendance 动态——work_attendance 真数据
+    // 经 A2 command 产生后由真实事件流替代；其余示例域不动
     {
       id: '2',
       type: 'performance',
