@@ -1,0 +1,9 @@
+  PASS  P1  inactive 员工 + 自己的 published 班 → clock-in DENY
+  PASS  P2  inactive 员工 SELECT 历史考勤 → ALLOW（Amendment A3 不受伤）
+  P3 布局：clock-in(SB) vs update_schedule(SB→11:00-19:00) 并发
+  P3 结果: ci=200 up=400 sched=10:00:00-18:00:00 att=1 planned=2027-05-11T02:00:00.000Z
+  PASS  P3  并发结果二选一合法 + schedule↔attendance snapshot 一致
+  P4 结果: ci=200 review=400 SC.emp=34656ae2 att=34656ae2 swap=pending
+  PASS  P4  clock-in vs swap 并发：无 identity mismatch；交换遇已开考班被挡
+  PASS  P5  terminal = attendance 0 · 301 legacy · 通知 0
+结果: PASS=5 FAIL=0
