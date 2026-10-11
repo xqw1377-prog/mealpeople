@@ -7,7 +7,7 @@ import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
 import {useCallback, useEffect, useState} from 'react'
-import {approveLeaveRequest, getPendingLeaveRequests, rejectLeaveRequest} from '@/db/api-leave'
+import {supabase} from '@/client/supabase'
 import type {LeaveRequestWithEmployee} from '@/db/types-leave'
 import {LEAVE_TYPE_NAMES} from '@/db/types-leave'
 
@@ -30,8 +30,15 @@ const LeaveApproval: React.FC = () => {
         return
       }
 
-      const data = await getPendingLeaveRequests(tenantId)
-      setRequests(data)
+      // P2 命令权威：RLS 决定可见性（tenant_admin/store_manager 自动过滤 pending）
+      const {data, error: qErr} = await supabase
+        .from('leave_requests')
+        .select('*, employees(name), employees!leave_requests_employee_id_fkey(name)')
+        .eq('status', 'pending')
+        .order('created_at', {ascending: false})
+        .limit(50)
+      if (qErr) throw qErr
+      setRequests(data || [])
     } catch (error) {
       console.error('加载待审批申请失败:', error)
       Taro.showToast({
@@ -73,7 +80,15 @@ const LeaveApproval: React.FC = () => {
     try {
       setProcessingId(requestId)
 
-      await approveLeaveRequest(requestId, user.id, commentMap[requestId])
+      const {error} = await supabase.rpc('leave_review', {
+        p_request_id: requestId,
+        p_approve: true,
+        p_comment: commentMap[requestId] || null
+      })
+      if (error) {
+        Taro.showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
+        return
+      }
 
       Taro.showToast({
         title: '已批准',
@@ -122,7 +137,15 @@ const LeaveApproval: React.FC = () => {
     try {
       setProcessingId(requestId)
 
-      await rejectLeaveRequest(requestId, user.id, comment.trim())
+      const {error} = await supabase.rpc('leave_review', {
+        p_request_id: requestId,
+        p_approve: false,
+        p_comment: comment.trim() || null
+      })
+      if (error) {
+        Taro.showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
+        return
+      }
 
       Taro.showToast({
         title: '已拒绝',

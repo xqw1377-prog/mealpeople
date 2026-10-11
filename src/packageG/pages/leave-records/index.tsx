@@ -8,7 +8,8 @@ import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
 import {useCallback, useEffect, useState} from 'react'
 import {Empty, ErrorState, Loading} from '@/components/common'
-import {cancelLeaveRequest, getLeaveRequestsByEmployee} from '@/db/api-leave'
+import {getLeaveRequestsByEmployee} from '@/db/api-leave'
+import {supabase} from '@/client/supabase'
 import type {LeaveRequest, LeaveStatus} from '@/db/types-leave'
 import {LEAVE_STATUS_COLORS, LEAVE_STATUS_NAMES, LEAVE_TYPE_NAMES} from '@/db/types-leave'
 
@@ -77,7 +78,11 @@ const LeaveRecords: React.FC = () => {
     if (!result.confirm) return
 
     try {
-      await cancelLeaveRequest(requestId)
+      const {error} = await supabase.rpc('leave_cancel', {p_request_id: requestId})
+      if (error) {
+        Taro.showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
+        return
+      }
       Taro.showToast({
         title: '已取消',
         icon: 'success'

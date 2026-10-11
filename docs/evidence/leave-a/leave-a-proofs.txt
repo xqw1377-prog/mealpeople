@@ -1,0 +1,9 @@
+  PASS  L1  员工创建请假 → pending + 通知审批人 ≥1
+  PASS  L2  日期重叠 → CONFLICT DENY
+  PASS  L3  管理者审批 → approved + comment 落库 + 员工通知
+  PASS  L4  员工取消自己的 pending → cancelled
+  PASS  L5  他人取消别人的申请 → DENY
+  PASS  L6  跨租户管理者审批 → DENY
+  PASS  L7  直写 INSERT → DENY（零写 policy）
+  PASS  L8  terminal = leave_requests 0 零残留
+结果: PASS=8 FAIL=0

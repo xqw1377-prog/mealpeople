@@ -7,7 +7,7 @@ import Taro from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
 import {useCallback, useEffect, useState} from 'react'
-import {createLeaveRequest} from '@/db/api-leave'
+import {supabase} from '@/client/supabase'
 import {LEAVE_TYPE_OPTIONS} from '@/db/types-leave'
 
 const LeaveRequest: React.FC = () => {
@@ -98,25 +98,18 @@ const LeaveRequest: React.FC = () => {
     try {
       setSubmitting(true)
 
-      // 获取租户ID和门店ID
-      const tenantId = localStorage.getItem('currentTenantId') || ''
-      const storeId = localStorage.getItem('currentStoreId') || ''
+      // P2 命令权威：leave_request RPC（服务端校验日期/冲突/在职身份，通知审批人）
+      const {error} = await supabase.rpc('leave_request', {
+        p_leave_type: leaveType,
+        p_start_date: startDate,
+        p_end_date: endDate,
+        p_reason: reason.trim() || null
+      })
 
-      if (!tenantId || !storeId) {
-        Taro.showToast({title: '请先选择租户和门店', icon: 'error'})
+      if (error) {
+        Taro.showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
         return
       }
-
-      await createLeaveRequest({
-        tenant_id: tenantId,
-        employee_id: user.id,
-        store_id: storeId,
-        leave_type: leaveType,
-        start_date: startDate,
-        end_date: endDate,
-        days,
-        reason: reason.trim()
-      })
 
       Taro.showToast({
         title: '申请已提交',
