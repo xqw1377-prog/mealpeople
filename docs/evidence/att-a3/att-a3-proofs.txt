@@ -1,0 +1,9 @@
+  [diag] get_my_attendance: 200 [{"id":"e6e429d9-aca8-4c34-942e-701a1c2bdaa2","schedule_id":"59abca38-0a96-4140-97d7-408c86d08550","business_date":"2030-06-01","planned_start_at":"2030-06-01T01:00:00+00:00","planned_end_at":"2030-06-01T09:00:00+00:00","clock_in_at":null,"clock_out_at":null,"late_minutes":0,"early_leave_minutes":0,
+  PASS  A3-1  八态投影：normal/late/early_leave/late_early_leave/missing_clock_out/not_started
+  PASS  A3-2  absent = 有班无卡（无 attendance 行，投影层不虚构行）
+  PASS  A3-3  管理者修正 clock_in → late 重算 + corrected 标记 + 不可变 event
+  PASS  A3-4  修正无 reason → DENY
+  PASS  A3-5  跨租户管理者修正 → DENY
+  PASS  A3-6  attendance_events 直写 UPDATE → 0行 · DELETE → 0行
+  PASS  TERM  terminal = attendance 0 · events 0（级联）· 301 legacy · 通知 0
+结果: PASS=7 FAIL=0
