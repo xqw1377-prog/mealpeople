@@ -25,8 +25,8 @@ import {
 } from '@/db/api-employment'
 import type {EmploymentContract} from '@/db/types-employment'
 import {useTenantStore} from '@/store/tenant'
-import {useSignatureViewUrl} from '@/utils/signature-view'
 import {getUserIpAddress, uploadSignature} from '@/utils/signature-upload'
+import {useSignatureViewUrl} from '@/utils/signature-view'
 
 /** G0-E: 签名 bucket 私有化后，列表内的签名图通过运行时签名 URL 显示 */
 const SignatureImage: React.FC<{url?: string | null}> = ({url}) => {

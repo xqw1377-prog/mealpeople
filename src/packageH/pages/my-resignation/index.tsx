@@ -110,7 +110,7 @@ export default function MyResignation() {
   }
 
   // 空状态：没有离职申请
-  if (!resignationData || !resignationData.application) {
+  if (!resignationData?.application) {
     return (
       <View className="min-h-screen bg-gray-50">
         <ScrollView scrollY className="box-border" style={{height: '100vh', background: 'transparent'}}>

@@ -110,7 +110,7 @@ export default function MyOffboarding() {
   }
 
   // 如果没有离职申请，显示创建入口
-  if (!offboardingData || !offboardingData.application) {
+  if (!offboardingData?.application) {
     return (
       <View className="min-h-screen bg-gray-50">
         <ScrollView scrollY className="box-border" style={{height: '100vh', background: 'transparent'}}>

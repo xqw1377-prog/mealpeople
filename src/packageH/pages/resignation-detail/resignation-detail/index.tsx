@@ -41,7 +41,7 @@ export default function ResignationDetail() {
 
       // 加载离职申请详情
       const detail = await getResignationApplicationDetail(id)
-      if (!detail || !detail.application) {
+      if (!detail?.application) {
         throw new Error('未找到离职申请')
       }
       setApplication(detail.application)

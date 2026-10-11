@@ -72,7 +72,7 @@ export default function ScheduleConfigCreate() {
 
       // 获取员工信息
       const employee = await getEmployeeByUserId(user.id)
-      if (!employee || !employee.tenant_id) {
+      if (!employee?.tenant_id) {
         Taro.showToast({title: '未找到员工信息', icon: 'none'})
         return
       }

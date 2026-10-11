@@ -300,7 +300,7 @@ const WorkShifts: React.FC = () => {
 
   // 解析时间字符串为选择器索引
   const _parseTimeToIndex = (timeStr: string): number[] => {
-    if (!timeStr || !timeStr.includes(':')) {
+    if (!timeStr?.includes(':')) {
       return [8, 0] // 默认08:00
     }
     const [hours, minutes] = timeStr.split(':')

@@ -104,7 +104,7 @@ const ScheduleLogForm: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [currentTenant, isEditMode, logId])
+  }, [currentTenant, isEditMode, logId, statusOptions.findIndex])
 
   useEffect(() => {
     loadData()
@@ -143,11 +143,14 @@ const ScheduleLogForm: React.FC = () => {
     [stores]
   )
 
-  const handleStatusChange = useCallback((e: any) => {
-    const index = Number(e.detail.value)
-    setStatusIndex(index)
-    setCompletionStatus(statusOptions[index].value)
-  }, [])
+  const handleStatusChange = useCallback(
+    (e: any) => {
+      const index = Number(e.detail.value)
+      setStatusIndex(index)
+      setCompletionStatus(statusOptions[index].value)
+    },
+    [statusOptions]
+  )
 
   const handleSubmit = useCallback(async () => {
     if (!currentTenant || !user) {

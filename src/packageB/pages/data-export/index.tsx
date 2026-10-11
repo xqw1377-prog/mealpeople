@@ -79,11 +79,14 @@ const DataExport: React.FC = () => {
   }, [])
 
   // 选择导出格式
-  const handleFormatChange = useCallback((e: any) => {
-    const index = e.detail.value
-    setFormatIndex(index)
-    setSelectedFormat(formatOptions[index].value as ExportFormat)
-  }, [])
+  const handleFormatChange = useCallback(
+    (e: any) => {
+      const index = e.detail.value
+      setFormatIndex(index)
+      setSelectedFormat(formatOptions[index].value as ExportFormat)
+    },
+    [formatOptions]
+  )
 
   // 开始导出
   const handleExport = useCallback(async () => {

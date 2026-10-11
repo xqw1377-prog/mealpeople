@@ -201,7 +201,7 @@ export default function HelpCenter() {
     } catch (error) {
       console.error('加载数据失败:', error)
     }
-  }, [currentTenant, user])
+  }, [currentTenant, user, helpCategories])
 
   useEffect(() => {
     loadData()

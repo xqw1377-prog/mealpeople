@@ -82,7 +82,7 @@ const TempWorkerForm: React.FC = () => {
         showToast({title: '加载失败', icon: 'none'})
       }
     },
-    [currentTenant]
+    [currentTenant, departmentValues.indexOf]
   )
 
   useEffect(() => {

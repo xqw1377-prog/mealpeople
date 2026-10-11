@@ -133,7 +133,7 @@ const InviteEmployee: React.FC = () => {
   }
 
   // 复制邀请码
-  const handleCopy = (code: string) => {
+  const _handleCopy = (code: string) => {
     Taro.setClipboardData({
       data: code,
       success: () => {
@@ -324,7 +324,7 @@ const InviteEmployee: React.FC = () => {
                         <View className="flex items-center gap-2">
                           {/* G0-Z-R2: 库中只存 hash，列表仅显示尾 4 位提示 */}
                           <Text className="text-xl font-bold text-muted-foreground">
-                            {code.token_hint ? `****${code.token_hint}` : (code.code || '（历史码已退休）')}
+                            {code.token_hint ? `****${code.token_hint}` : code.code || '（历史码已退休）'}
                           </Text>
                           <View className={`px-2 py-1 rounded text-xs ${statusBadge.color}`}>
                             <Text className="text-xs">{statusBadge.text}</Text>

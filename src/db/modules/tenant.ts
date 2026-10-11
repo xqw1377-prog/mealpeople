@@ -481,8 +481,8 @@ export async function rejectTenantApplication(
  * 生成邀请码
  */
 export async function generateInvitationCode(
-  tenantId: string,
-  createdBy: string,
+  _tenantId: string,
+  _createdBy: string,
   options?: {
     maxUses?: number
     expiresAt?: string

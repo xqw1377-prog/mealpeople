@@ -117,7 +117,7 @@ export default function TenantSettings() {
     } finally {
       setLoading(false)
     }
-  }, [activeTenant?.id, targetTenantLoaded, activeTenant?.name])
+  }, [activeTenant?.id, targetTenantLoaded, activeTenant?.name, industryOptions.indexOf])
 
   // Logo上传函数
   const handleUploadLogo = async () => {

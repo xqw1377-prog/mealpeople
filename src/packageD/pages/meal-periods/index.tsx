@@ -256,7 +256,7 @@ const MealPeriods: React.FC = () => {
 
   // 解析时间字符串为选择器索引
   const parseTimeToIndex = (timeStr: string): number[] => {
-    if (!timeStr || !timeStr.includes(':')) {
+    if (!timeStr?.includes(':')) {
       return [11, 0] // 默认11:00
     }
     const [hours, minutes] = timeStr.split(':')

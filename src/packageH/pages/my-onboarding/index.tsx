@@ -91,7 +91,7 @@ export default function MyOnboarding() {
     )
   }
 
-  if (!onboardingData || !onboardingData.application) {
+  if (!onboardingData?.application) {
     return (
       <View className="@container min-h-screen bg-gray-50">
         <ScrollView scrollY className="box-border" style={{height: '100vh', background: 'transparent'}}>

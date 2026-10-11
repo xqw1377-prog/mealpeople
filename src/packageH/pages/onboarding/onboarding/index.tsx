@@ -91,7 +91,7 @@ export default function MyOnboarding() {
     )
   }
 
-  if (!onboardingData || !onboardingData.application) {
+  if (!onboardingData?.application) {
     return (
       <View className="flex items-center justify-center h-screen">
         <Text className="text-muted-foreground">暂无入职信息</Text>

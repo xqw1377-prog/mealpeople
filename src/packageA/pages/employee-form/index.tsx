@@ -126,7 +126,7 @@ const EmployeeForm: React.FC = () => {
         showToast({title: '加载失败', icon: 'none'})
       }
     },
-    [currentTenant]
+    [currentTenant, employeeTypeValues.indexOf, departmentValues.indexOf]
   )
 
   useEffect(() => {
