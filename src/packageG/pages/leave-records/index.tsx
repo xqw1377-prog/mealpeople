@@ -1,282 +1,172 @@
 /**
- * 请假记录页面
+ * 请假记录 · P2 重写（command RPC + DS）
+ * 员工：自己的请假历史 + 撤回 pending
+ * DS：TabHero / StatsStrip / ErrorBanner / tokens
  */
 
-import {Button, ScrollView, Text, View} from '@tarojs/components'
+import {ScrollView, Text, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
-import {useCallback, useEffect, useState} from 'react'
-import {Empty, ErrorState, Loading} from '@/components/common'
-import {getLeaveRequestsByEmployee} from '@/db/api-leave'
+import {useCallback, useState} from 'react'
 import {supabase} from '@/client/supabase'
-import type {LeaveRequest, LeaveStatus} from '@/db/types-leave'
-import {LEAVE_STATUS_COLORS, LEAVE_STATUS_NAMES, LEAVE_TYPE_NAMES} from '@/db/types-leave'
+import {ErrorBanner, StatsStrip, TabHero} from '@/components/ds'
+
+interface LeaveRow {
+  id: string
+  leave_type: string
+  start_date: string
+  end_date: string
+  days: number | null
+  reason: string | null
+  status: string
+  approval_comment: string | null
+  created_at: string
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  annual_leave: '年假',
+  sick_leave: '病假',
+  personal_leave: '事假',
+  other: '其他'
+}
+
+const STATUS: Record<string, {text: string; tone: string; icon: string}> = {
+  pending: {text: '待审批', tone: 'text-warning-600 bg-warning-50', icon: 'i-mdi-clock-outline'},
+  approved: {text: '已通过', tone: 'text-success-600 bg-success-50', icon: 'i-mdi-check-circle'},
+  rejected: {text: '已拒绝', tone: 'text-danger-600 bg-danger-50', icon: 'i-mdi-close-circle'},
+  cancelled: {text: '已撤回', tone: 'text-gray-500 bg-gray-100', icon: 'i-mdi-cancel'}
+}
+
+const md = (d: string) => d.slice(5).replace('-', '月') + '日'
 
 const LeaveRecords: React.FC = () => {
-  const {user} = useAuth({guard: true})
-  const [records, setRecords] = useState<LeaveRequest[]>([])
-  const [filteredRecords, setFilteredRecords] = useState<LeaveRequest[]>([])
+  useAuth({guard: true})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'all' | LeaveStatus>('all')
+  const [rows, setRows] = useState<LeaveRow[]>([])
+  const [acting, setActing] = useState('')
 
-  // 筛选记录
-  const filterRecords = useCallback((data: LeaveRequest[], tab: 'all' | LeaveStatus) => {
-    if (tab === 'all') {
-      setFilteredRecords(data)
-    } else {
-      setFilteredRecords(data.filter((r) => r.status === tab))
-    }
-  }, [])
-
-  // 加载记录
-  const loadRecords = useCallback(async () => {
-    if (!user?.id) return
-
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
     try {
-      setLoading(true)
-      setError(null)
-      const data = await getLeaveRequestsByEmployee(user.id)
-      setRecords(data)
-      filterRecords(data, activeTab)
-    } catch (err) {
-      console.error('加载记录失败:', err)
-      const errorMessage = err instanceof Error ? err.message : '加载失败，请重试'
-      setError(errorMessage)
-      Taro.showToast({
-        title: '加载失败',
-        icon: 'error',
-        duration: 2000
-      })
+      const {data, error: qErr} = await supabase
+        .from('leave_requests')
+        .select('id, leave_type, start_date, end_date, days, reason, status, approval_comment, created_at')
+        .order('created_at', {ascending: false})
+        .limit(50)
+      if (qErr) throw qErr
+      setRows((data || []) as unknown as LeaveRow[])
+    } catch (e) {
+      console.error('加载请假记录失败:', e)
+      setError('加载失败，请重试')
     } finally {
       setLoading(false)
     }
-  }, [user?.id, activeTab, filterRecords])
-
-  useEffect(() => {
-    loadRecords()
-  }, [loadRecords])
+  }, [])
 
   useDidShow(() => {
-    loadRecords()
+    load()
   })
 
-  // 切换标签
-  const handleTabChange = (tab: 'all' | LeaveStatus) => {
-    setActiveTab(tab)
-    filterRecords(records, tab)
-  }
-
-  // 取消申请
-  const handleCancel = async (requestId: string) => {
-    const result = await Taro.showModal({
-      title: '确认取消',
-      content: '确定要取消这个请假申请吗？'
+  const cancel = async (id: string) => {
+    if (acting) return
+    const res = await Taro.showModal({
+      title: '撤回申请',
+      content: '确定撤回这笔请假申请吗？',
+      confirmText: '撤回',
+      cancelText: '保留'
     })
-
-    if (!result.confirm) return
-
+    if (!res.confirm) return
+    setActing(id)
     try {
-      const {error} = await supabase.rpc('leave_cancel', {p_request_id: requestId})
-      if (error) {
-        Taro.showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
+      const {error: e} = await supabase.rpc('leave_cancel', {p_request_id: id})
+      if (e) {
+        Taro.showToast({title: e.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
         return
       }
-      Taro.showToast({
-        title: '已取消',
-        icon: 'success'
-      })
-      loadRecords()
-    } catch (error) {
-      console.error('取消失败:', error)
-      Taro.showToast({
-        title: '取消失败',
-        icon: 'error'
-      })
+      Taro.showToast({title: '已撤回', icon: 'success'})
+      load()
+    } finally {
+      setActing('')
     }
   }
 
-  // 渲染记录卡片
-  const renderRecordCard = (record: LeaveRequest) => {
-    const statusColor = LEAVE_STATUS_COLORS[record.status]
-    const canCancel = record.status === 'pending'
-
-    return (
-      <View key={record.id} className="bg-white rounded-xl p-4 border-2 border-gray-200 mb-3 shadow">
-        {/* 头部 */}
-        <View className="flex flex-row items-center justify-between mb-3">
-          <View className="flex flex-row items-center">
-            <View
-              className={`w-2 h-2 rounded-full mr-2 ${
-                record.status === 'pending'
-                  ? 'bg-warning'
-                  : record.status === 'approved'
-                    ? 'bg-success'
-                    : record.status === 'rejected'
-                      ? 'bg-destructive'
-                      : 'bg-gray-50-foreground'
-              }`}
-            />
-            <Text className="font-semibold">{LEAVE_TYPE_NAMES[record.leave_type]}</Text>
-          </View>
-          <Text className={`text-xs font-medium ${statusColor}`}>{LEAVE_STATUS_NAMES[record.status]}</Text>
-        </View>
-
-        {/* 日期和天数 */}
-        <View className="flex flex-row items-center mb-2">
-          <View className="i-mdi-calendar text-base text-muted-foreground mr-2" />
-          <Text className="text-sm text-foreground">
-            {record.start_date} ~ {record.end_date}
-          </Text>
-          <Text className="text-sm text-blue-600 ml-2">({record.days} 天)</Text>
-        </View>
-
-        {/* 原因 */}
-        {record.reason && (
-          <View className="flex flex-row items-start mb-2">
-            <View className="i-mdi-text text-base text-muted-foreground mr-2 mt-0.5" />
-            <Text className="text-sm text-muted-foreground flex-1">{record.reason}</Text>
-          </View>
-        )}
-
-        {/* 审批信息 */}
-        {record.status !== 'pending' && record.status !== 'cancelled' && (
-          <View className="mt-3 pt-3 border-t border-border">
-            <View className="flex flex-row items-center justify-between">
-              <Text className="text-xs text-muted-foreground">
-                审批时间: {record.approved_at ? new Date(record.approved_at).toLocaleString('zh-CN') : '-'}
-              </Text>
-            </View>
-            {record.approval_comment && (
-              <View className="mt-2">
-                <Text className="text-xs text-muted-foreground">审批意见: {record.approval_comment}</Text>
-              </View>
-            )}
-          </View>
-        )}
-
-        {/* 操作按钮 */}
-        {canCancel && (
-          <View className="mt-3 pt-3 border-t border-border">
-            <Button
-              className="w-full bg-destructive/10 text-destructive py-2 rounded-lg break-keep text-sm"
-              size="default"
-              onClick={() => handleCancel(record.id)}>
-              取消申请
-            </Button>
-          </View>
-        )}
-
-        {/* 创建时间 */}
-        <View className="mt-2">
-          <Text className="text-xs text-muted-foreground">
-            申请时间: {new Date(record.created_at).toLocaleString('zh-CN')}
-          </Text>
-        </View>
-      </View>
-    )
-  }
-
-  // 统计数量
-  const counts = {
-    all: records.length,
-    pending: records.filter((r) => r.status === 'pending').length,
-    approved: records.filter((r) => r.status === 'approved').length,
-    rejected: records.filter((r) => r.status === 'rejected').length
-  }
-
-  // 加载状态
-  if (loading) {
-    return (
-      <View className="min-h-screen bg-gray-50">
-        <Loading text="加载请假记录..." size="medium" fullscreen />
-      </View>
-    )
-  }
-
-  // 错误状态
-  if (error) {
-    return (
-      <View className="min-h-screen bg-gray-50">
-        <ErrorState message="加载失败" description={error} onRetry={loadRecords} />
-      </View>
-    )
-  }
+  const approved = rows.filter((r) => r.status === 'approved').length
+  const pending = rows.filter((r) => r.status === 'pending').length
+  const rejected = rows.filter((r) => r.status === 'rejected').length
 
   return (
     <View className="min-h-screen bg-gray-50">
-      {/* 标签栏 */}
-      <View className="bg-white px-4 py-3 shadow">
-        <View className="flex flex-row space-x-2">
-          <View
-            className={`px-4 py-2 rounded-full ${activeTab === 'all' ? 'bg-green-500 text-white' : 'bg-gray-50'}`}
-            onClick={() => handleTabChange('all')}>
-            <Text className={`text-sm font-medium ${activeTab === 'all' ? 'text-white' : 'text-muted-foreground'}`}>
-              全部 ({counts.all})
-            </Text>
-          </View>
+      <TabHero title="请假记录" subtitle="申请历史与审批结果" />
+      <ScrollView scrollY className="h-screen box-border bg-transparent">
+        <View className="px-4 pb-8 -mt-9">
+          <StatsStrip
+            items={[
+              {value: rows.length, label: '全部'},
+              {value: pending, label: '待审批', valueClass: pending > 0 ? 'text-warning-600' : ''},
+              {value: approved, label: '已通过', valueClass: 'text-success-600'},
+              {value: rejected, label: '已拒绝', valueClass: 'text-danger-600'}
+            ]}
+          />
 
-          <View
-            className={`px-4 py-2 rounded-full ${
-              activeTab === 'pending' ? 'bg-warning text-warning-foreground' : 'bg-gray-50'
-            }`}
-            onClick={() => handleTabChange('pending')}>
-            <Text
-              className={`text-sm font-medium ${
-                activeTab === 'pending' ? 'text-warning-foreground' : 'text-muted-foreground'
-              }`}>
-              待审批 ({counts.pending})
-            </Text>
-          </View>
+          {error && (
+            <View className="mt-3">
+              <ErrorBanner message={error} onRetry={load} />
+            </View>
+          )}
 
-          <View
-            className={`px-4 py-2 rounded-full ${
-              activeTab === 'approved' ? 'bg-success text-success-foreground' : 'bg-gray-50'
-            }`}
-            onClick={() => handleTabChange('approved')}>
-            <Text
-              className={`text-sm font-medium ${
-                activeTab === 'approved' ? 'text-success-foreground' : 'text-muted-foreground'
-              }`}>
-              已通过 ({counts.approved})
-            </Text>
-          </View>
+          <View className="mt-3 space-y-3">
+            {loading ? (
+              [0, 1].map((i) => <View key={i} className="bg-white rounded-2xl shadow-sm h-32 animate-pulse" />)
+            ) : rows.length === 0 ? (
+              <View className="bg-white rounded-2xl shadow-sm py-12 flex flex-col items-center">
+                <View className="i-mdi-calendar-remove-outline text-5xl text-gray-200" />
+                <Text className="mt-2 text-sm text-gray-400">暂无请假记录</Text>
+              </View>
+            ) : (
+              rows.map((r) => {
+                const st = STATUS[r.status] || STATUS.pending
+                return (
+                  <View key={r.id} className="bg-white rounded-2xl shadow-sm p-4">
+                    <View className="flex items-center justify-between mb-3">
+                      <View className={`px-2.5 py-1 rounded-full flex items-center gap-1 ${st.tone}`}>
+                        <View className={`${st.icon} text-sm`} />
+                        <Text className="text-xs font-medium">{st.text}</Text>
+                      </View>
+                      <Text className="text-xs text-gray-400">{new Date(r.created_at).toLocaleDateString()}</Text>
+                    </View>
 
-          <View
-            className={`px-4 py-2 rounded-full ${
-              activeTab === 'rejected' ? 'bg-destructive text-destructive-foreground' : 'bg-gray-50'
-            }`}
-            onClick={() => handleTabChange('rejected')}>
-            <Text
-              className={`text-sm font-medium ${
-                activeTab === 'rejected' ? 'text-destructive-foreground' : 'text-muted-foreground'
-              }`}>
-              已拒绝 ({counts.rejected})
-            </Text>
+                    <View className="bg-gray-50 rounded-xl p-3">
+                      <View className="flex items-center justify-between">
+                        <Text className="text-sm font-medium text-gray-800">
+                          {TYPE_LABEL[r.leave_type] || r.leave_type}
+                        </Text>
+                        <Text className="text-xs text-gray-400">{r.days || 1} 天</Text>
+                      </View>
+                      <Text className="text-sm text-gray-600 mt-1">
+                        {md(r.start_date)} – {md(r.end_date)}
+                      </Text>
+                      {r.reason && <Text className="text-xs text-gray-500 mt-1">原因：{r.reason}</Text>}
+                      {r.approval_comment && (
+                        <Text className="text-xs text-gray-500 mt-0.5">审批：{r.approval_comment}</Text>
+                      )}
+                    </View>
+
+                    {r.status === 'pending' && (
+                      <View
+                        className="mt-3 text-center py-2 rounded-lg bg-gray-100 active:opacity-70"
+                        onClick={() => cancel(r.id)}>
+                        <Text className="text-xs text-gray-600">{acting === r.id ? '处理中…' : '撤回申请'}</Text>
+                      </View>
+                    )}
+                  </View>
+                )
+              })
+            )}
           </View>
         </View>
-      </View>
-
-      {/* 记录列表 */}
-      <ScrollView scrollY className="p-4" style={{height: 'calc(100vh - 60px)'}}>
-        {filteredRecords.length === 0 ? (
-          <Empty
-            icon="i-mdi-file-document-outline"
-            text="暂无请假记录"
-            description={
-              activeTab === 'all'
-                ? '您还没有提交过请假申请'
-                : `暂无${LEAVE_STATUS_NAMES[activeTab as LeaveStatus]}的记录`
-            }
-            buttonText="提交申请"
-            onButtonClick={() => {
-              Taro.navigateTo({url: '/packageG/pages/leave-request/index'})
-            }}
-          />
-        ) : (
-          filteredRecords.map((record) => renderRecordCard(record))
-        )}
       </ScrollView>
     </View>
   )
