@@ -279,48 +279,28 @@ export default function MyLeave() {
             <View className="grid grid-cols-2 gap-3">
               <View
                 className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '请假申请功能开发中',
-                    icon: 'none'
-                  })
-                }}>
+                onClick={() => Taro.navigateTo({url: '/packageG/pages/leave-request/index'})}>
                 <View className="i-mdi-file-document-plus text-3xl text-muted-foreground mb-2" />
                 <Text className="text-xs text-muted-foreground font-medium text-center">申请请假</Text>
               </View>
 
               <View
                 className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '请假历史功能开发中',
-                    icon: 'none'
-                  })
-                }}>
+                onClick={() => Taro.navigateTo({url: '/packageG/pages/leave-records/index'})}>
                 <View className="i-mdi-history text-3xl text-muted-foreground mb-2" />
                 <Text className="text-xs text-muted-foreground font-medium text-center">请假历史</Text>
               </View>
 
               <View
                 className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '假期规则功能开发中',
-                    icon: 'none'
-                  })
-                }}>
-                <View className="i-mdi-information text-3xl text-muted-foreground mb-2" />
-                <Text className="text-xs text-muted-foreground font-medium text-center">假期规则</Text>
+                onClick={() => Taro.navigateTo({url: '/packageG/pages/leave-approval/index'})}>
+                <View className="i-mdi-check-circle-outline text-3xl text-muted-foreground mb-2" />
+                <Text className="text-xs text-muted-foreground font-medium text-center">请假审批</Text>
               </View>
 
               <View
                 className="bg-blue-100 rounded-xl p-4 flex flex-col items-center justify-center active:opacity-70"
-                onClick={() => {
-                  Taro.showToast({
-                    title: '请假报告功能开发中',
-                    icon: 'none'
-                  })
-                }}>
+                onClick={() => Taro.navigateTo({url: '/packageG/pages/leave-records/index'})}>
                 <View className="i-mdi-file-chart text-3xl text-muted-foreground mb-2" />
                 <Text className="text-xs text-muted-foreground font-medium text-center">请假报告</Text>
               </View>

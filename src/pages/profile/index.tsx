@@ -205,7 +205,7 @@ export default function Profile() {
               {
                 title: 'Agent工作台',
                 desc: '查看管理的门店和数据',
-                url: '/pages/agent-workspace/index',
+                url: '/packageF/pages/agent-workspace/index',
                 icon: 'i-mdi-view-dashboard-outline',
                 tone: 'primary',
                 badge: '推荐'
@@ -213,7 +213,7 @@ export default function Profile() {
               {
                 title: '我的门店',
                 desc: '查看分配给我的门店',
-                url: '/pages/agent-workspace/index',
+                url: '/packageF/pages/agent-workspace/index',
                 icon: 'i-mdi-store-outline',
                 tone: 'info'
               }
@@ -229,7 +229,7 @@ export default function Profile() {
                   {
                     title: '加入团队',
                     desc: '使用邀请码加入企业团队',
-                    url: '/packageE/pages/join-tenant/index',
+                    url: '/packageD/pages/join-tenant/index',
                     icon: 'i-mdi-account-multiple-plus-outline',
                     tone: 'success' as const,
                     badge: '推荐'
