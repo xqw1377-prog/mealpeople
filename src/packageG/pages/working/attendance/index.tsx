@@ -1,398 +1,235 @@
 /**
- * 考勤打卡页面
- * V3.17 新增功能 - 员工考勤打卡
- * 设计理念：简洁、快速、便捷
+ * 考勤打卡 · P2 重写（command RPC + DS）
+ * 旅途主线：我今天上什么班 → 上班卡 → 下班卡 → 我的考勤记录
+ * 数据：attendance_clock_in/out command + get_my_attendance 投影
+ * DS：TabHero / ErrorBanner / tokens；状态完整
  */
 
-import {Button, ScrollView, Text, View} from '@tarojs/components'
+import {ScrollView, Text, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import {useCallback, useState} from 'react'
-import {getEmployeeByUserId} from '@/db/api'
-import {type AttendanceRecord, clockIn, clockOut, getAttendanceRecords, getTodayAttendance} from '@/db/api-attendance'
+import {supabase} from '@/client/supabase'
+import {ErrorBanner, TabHero} from '@/components/ds'
+
+interface MyAttendance {
+  id: string
+  schedule_id: string
+  business_date: string
+  planned_start_at: string
+  planned_end_at: string
+  clock_in_at: string | null
+  clock_out_at: string | null
+  late_minutes: number
+  early_leave_minutes: number
+  work_hours: number | null
+  projection: string
+}
+
+const PROJ_LABEL: Record<string, {text: string; tone: string; icon: string}> = {
+  not_started: {text: '未开始', tone: 'text-gray-500 bg-gray-100', icon: 'i-mdi-clock-outline'},
+  in_progress: {text: '进行中', tone: 'text-info-600 bg-info-50', icon: 'i-mdi-play-circle-outline'},
+  normal: {text: '正常', tone: 'text-success-600 bg-success-50', icon: 'i-mdi-check-circle'},
+  late: {text: '迟到', tone: 'text-warning-600 bg-warning-50', icon: 'i-mdi-clock-alert-outline'},
+  early_leave: {text: '早退', tone: 'text-warning-600 bg-warning-50', icon: 'i-mdi-clock-end'},
+  late_early_leave: {text: '迟到+早退', tone: 'text-warning-600 bg-warning-50', icon: 'i-mdi-clock-alert-outline'},
+  absent: {text: '缺勤', tone: 'text-danger-600 bg-danger-50', icon: 'i-mdi-close-circle'},
+  missing_clock_out: {text: '缺下班卡', tone: 'text-danger-600 bg-danger-50', icon: 'i-mdi-help-circle-outline'}
+}
+
+const hm = (t: string | null) =>
+  t ? new Date(t).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit', hour12: false}) : ''
+const md = (d: string) => d.slice(5).replace('-', '月') + '日'
 
 export default function Attendance() {
-  const {user} = useAuth({guard: true})
-  const [loading, setLoading] = useState(false)
-  const [todayRecord, setTodayRecord] = useState<AttendanceRecord | null>(null)
-  const [recentRecords, setRecentRecords] = useState<AttendanceRecord[]>([])
-  const [employeeId, setEmployeeId] = useState<string>('')
+  useAuth({guard: true})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [records, setRecords] = useState<MyAttendance[]>([])
+  const [acting, setActing] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  // 获取当前时间
-  const getCurrentTime = () => {
-    const now = new Date()
-    const hours = String(now.getHours()).padStart(2, '0')
-    const minutes = String(now.getMinutes()).padStart(2, '0')
-    return `${hours}:${minutes}`
-  }
-
-  // 获取当前日期
-  const getCurrentDate = () => {
-    const now = new Date()
-    const year = now.getFullYear()
-    const month = String(now.getMonth() + 1).padStart(2, '0')
-    const day = String(now.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-  }
-
-  // 格式化时间（从ISO字符串提取时分）
-  const formatTime = (isoString?: string) => {
-    if (!isoString) return '--:--'
-    const date = new Date(isoString)
-    const hours = String(date.getHours()).padStart(2, '0')
-    const minutes = String(date.getMinutes()).padStart(2, '0')
-    return `${hours}:${minutes}`
-  }
-
-  // 格式化日期
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr)
-    const month = date.getMonth() + 1
-    const day = date.getDate()
-    const weekDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-    const weekDay = weekDays[date.getDay()]
-    return `${month}月${day}日 ${weekDay}`
-  }
-
-  // 加载今日打卡记录
-  const loadTodayRecord = useCallback(async () => {
-    if (!user?.id) return
-
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
     try {
-      setLoading(true)
-
-      // 获取员工ID
-      const employee = await getEmployeeByUserId(user.id)
-      if (!employee) {
-        console.error('未找到员工信息')
-        return
-      }
-
-      setEmployeeId(employee.id)
-
-      // 加载今日打卡记录
-      const record = await getTodayAttendance(employee.id)
-      setTodayRecord(record)
-
-      // 加载最近7天的打卡记录
-      const now = new Date()
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-      const startDate = sevenDaysAgo.toISOString().split('T')[0]
-      const records = await getAttendanceRecords(employee.id, startDate)
-      setRecentRecords(records.slice(0, 5)) // 只显示最近5条
-    } catch (error) {
-      console.error('加载打卡记录失败:', error)
+      const {data, error: rpcErr} = await supabase.rpc('get_my_attendance', {})
+      if (rpcErr) throw rpcErr
+      setRecords((data as unknown as MyAttendance[]) || [])
+    } catch (e) {
+      console.error('加载考勤失败:', e)
+      setError('考勤加载失败，请重试')
     } finally {
       setLoading(false)
     }
-  }, [user?.id])
+  }, [])
 
-  // 页面显示时加载数据
   useDidShow(() => {
-    loadTodayRecord()
+    load()
   })
 
-  // 上班打卡
-  const handleClockIn = async () => {
-    if (!user?.id) {
-      Taro.showToast({
-        title: '请先登录',
-        icon: 'error'
-      })
-      return
-    }
+  const today = new Date().toISOString().slice(0, 10)
+  const todayRecords = records.filter((r) => r.business_date === today)
+  // 可打卡的班次：今天 published + 尚未打上班卡
+  const clockableShifts = todayRecords.filter((r) => r.projection === 'not_started' || r.projection === 'in_progress')
 
+  const clockIn = async (scheduleId: string) => {
+    if (acting) return
+    setActing(true)
+    setActionError(null)
     try {
-      setLoading(true)
-
-      // 获取完整的员工信息
-      const employee = await getEmployeeByUserId(user.id)
-      if (!employee) {
-        Taro.showToast({
-          title: '未找到员工信息',
-          icon: 'error'
-        })
+      const {error: e} = await supabase.rpc('attendance_clock_in', {p_schedule_id: scheduleId})
+      if (e) {
+        setActionError(e.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''))
         return
       }
-
-      // 调用打卡接口，传递正确的tenant_id
-      const record = await clockIn(
-        employee.id, // 员工UUID
-        employee.tenant_id, // ✅ 租户UUID（从员工记录获取）
-        employee.store_id || undefined // 门店UUID
-      )
-
-      if (record) {
-        setTodayRecord(record)
-        setEmployeeId(employee.id)
-        Taro.showToast({
-          title: '上班打卡成功',
-          icon: 'success',
-          duration: 2000
-        })
-        // 重新加载数据
-        await loadTodayRecord()
-      } else {
-        Taro.showToast({
-          title: '打卡失败，请重试',
-          icon: 'error',
-          duration: 2000
-        })
-      }
-    } catch (error) {
-      console.error('打卡失败:', error)
-      Taro.showToast({
-        title: '打卡失败，请重试',
-        icon: 'error',
-        duration: 2000
-      })
+      Taro.showToast({title: '上班打卡成功', icon: 'success'})
+      load()
     } finally {
-      setLoading(false)
+      setActing(false)
     }
   }
 
-  // 下班打卡
-  const handleClockOut = async () => {
-    if (!user?.id) {
-      Taro.showToast({
-        title: '请先登录',
-        icon: 'error'
-      })
-      return
-    }
-
-    // 如果员工ID还未加载，先加载
-    let empId = employeeId
-    if (!empId) {
-      try {
-        const employee = await getEmployeeByUserId(user.id)
-        if (!employee) {
-          Taro.showToast({
-            title: '未找到员工信息',
-            icon: 'error'
-          })
-          return
-        }
-        empId = employee.id
-        setEmployeeId(empId)
-      } catch (error) {
-        console.error('获取员工信息失败:', error)
-        Taro.showToast({
-          title: '获取员工信息失败',
-          icon: 'error'
-        })
+  const clockOut = async (scheduleId: string) => {
+    if (acting) return
+    setActing(true)
+    setActionError(null)
+    try {
+      const {error: e} = await supabase.rpc('attendance_clock_out', {p_schedule_id: scheduleId})
+      if (e) {
+        setActionError(e.message.replace(/^(AUTH_DENIED|INVALID|CONFLICT)[^:]*:\s*/, ''))
         return
       }
-    }
-
-    try {
-      setLoading(true)
-
-      // 调用打卡接口
-      const record = await clockOut(empId)
-
-      if (record) {
-        setTodayRecord(record)
-        Taro.showToast({
-          title: '下班打卡成功',
-          icon: 'success',
-          duration: 2000
-        })
-        // 重新加载数据
-        await loadTodayRecord()
-      } else {
-        Taro.showToast({
-          title: '打卡失败，请重试',
-          icon: 'error',
-          duration: 2000
-        })
-      }
-    } catch (error) {
-      console.error('打卡失败:', error)
-      Taro.showToast({
-        title: '打卡失败，请重试',
-        icon: 'error',
-        duration: 2000
-      })
+      Taro.showToast({title: '下班打卡成功', icon: 'success'})
+      load()
     } finally {
-      setLoading(false)
+      setActing(false)
     }
   }
 
-  // 获取状态文字
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'normal':
-        return '正常'
-      case 'late':
-        return '迟到'
-      case 'early_leave':
-        return '早退'
-      case 'absent':
-        return '缺勤'
-      default:
-        return '未知'
-    }
-  }
-
-  // 获取状态颜色
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'normal':
-        return 'text-muted-foreground'
-      case 'late':
-        return 'text-muted-foreground'
-      case 'early_leave':
-        return 'text-muted-foreground'
-      case 'absent':
-        return 'text-red-600'
-      default:
-        return 'text-muted-foreground'
-    }
-  }
+  const nowTime = new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit', hour12: false})
 
   return (
     <View className="min-h-screen bg-gray-50">
+      <TabHero title="考勤打卡" subtitle="按排班打卡 · 服务端记录" />
       <ScrollView scrollY className="h-screen box-border bg-transparent">
-        <View className="p-4 space-y-4">
-          {/* 当前时间卡片 */}
-          <View className="bg-blue-100 rounded-lg p-6 text-center">
-            <Text className="text-blue-600/80 text-sm mb-2">当前时间</Text>
-            <Text className="text-foreground text-4xl font-bold mb-1">{getCurrentTime()}</Text>
-            <Text className="text-blue-600/80 text-sm">{getCurrentDate()}</Text>
-          </View>
-
-          {/* 打卡按钮 */}
-          <View className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
-            {todayRecord ? (
-              <View className="space-y-4">
-                {/* 已打上班卡 */}
-                <View className="bg-blue-100 rounded-xl p-4">
-                  <View className="flex flex-row items-center justify-between mb-2">
-                    <Text className="text-sm text-muted-foreground">上班打卡</Text>
-                    <View className="bg-green-600 rounded-full px-3 py-1">
-                      <Text className="text-blue-600 text-xs">已打卡</Text>
-                    </View>
-                  </View>
-                  <Text className="text-2xl font-bold text-muted-foreground">
-                    {formatTime(todayRecord.clock_in_time)}
-                  </Text>
-                </View>
-
-                {/* 下班打卡按钮 */}
-                {!todayRecord.clock_out_time ? (
-                  <Button
-                    className="w-full bg-blue-100 text-white py-4 rounded-xl break-keep text-base font-bold"
-                    size="default"
-                    onClick={handleClockOut}
-                    disabled={loading}>
-                    {loading ? '打卡中...' : '下班打卡'}
-                  </Button>
-                ) : (
-                  <View className="bg-blue-100 rounded-xl p-4">
-                    <View className="flex flex-row items-center justify-between mb-2">
-                      <Text className="text-sm text-muted-foreground">下班打卡</Text>
-                      <View className="bg-blue-100 rounded-full px-3 py-1">
-                        <Text className="text-blue-600 text-xs">已打卡</Text>
-                      </View>
-                    </View>
-                    <Text className="text-2xl font-bold text-muted-foreground">
-                      {formatTime(todayRecord.clock_out_time)}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            ) : (
-              <Button
-                className="w-full bg-green-600 text-white py-6 rounded-xl break-keep text-lg font-bold"
-                size="default"
-                onClick={handleClockIn}
-                disabled={loading}>
-                {loading ? '打卡中...' : '上班打卡'}
-              </Button>
-            )}
-          </View>
-
-          {/* 今日统计 */}
-          {todayRecord && (
-            <View className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
-              <View className="flex flex-row items-center justify-between mb-4">
-                <Text className="text-lg font-semibold text-foreground">今日统计</Text>
-                <View className="i-mdi-chart-bar text-2xl text-blue-600" />
-              </View>
-
-              <View className="grid grid-cols-3 gap-3">
-                <View className="bg-blue-100 rounded-xl p-3 text-center">
-                  <Text className="text-xs text-muted-foreground">上班时间</Text>
-                  <Text className="text-lg font-bold text-muted-foreground mt-1">
-                    {formatTime(todayRecord.clock_in_time)}
-                  </Text>
-                </View>
-
-                <View className="bg-blue-100 rounded-xl p-3 text-center">
-                  <Text className="text-xs text-muted-foreground">下班时间</Text>
-                  <Text className="text-lg font-bold text-muted-foreground mt-1">
-                    {formatTime(todayRecord.clock_out_time)}
-                  </Text>
-                </View>
-
-                <View className="bg-blue-100 rounded-xl p-3 text-center">
-                  <Text className="text-xs text-muted-foreground">工作时长</Text>
-                  <Text className="text-lg font-bold text-muted-foreground mt-1">
-                    {todayRecord.work_hours ? `${todayRecord.work_hours}h` : '--'}
-                  </Text>
-                </View>
-              </View>
+        <View className="px-4 pb-8 -mt-9">
+          {error && (
+            <View className="mb-3">
+              <ErrorBanner message={error} onRetry={load} />
             </View>
           )}
 
-          {/* 最近打卡记录 */}
-          <View className="bg-white rounded-lg p-6 border-2 border-gray-200 shadow-sm">
-            <View className="flex flex-row items-center justify-between mb-4">
-              <Text className="text-lg font-semibold text-foreground">最近打卡</Text>
-              <View className="i-mdi-history text-2xl text-blue-600" />
+          {loading ? (
+            <View className="bg-white rounded-2xl shadow-sm p-6 space-y-3">
+              <View className="h-6 w-24 rounded bg-gray-100 animate-pulse" />
+              <View className="h-12 w-32 rounded bg-gray-100 animate-pulse" />
             </View>
+          ) : (
+            <>
+              {/* 今日班次与打卡 */}
+              <View className="bg-white rounded-2xl shadow-sm p-4 mb-3">
+                <View className="flex items-center justify-between mb-3">
+                  <Text className="text-sm font-semibold text-gray-800">今日考勤</Text>
+                  <Text className="text-xs text-gray-400">当前 {nowTime}</Text>
+                </View>
 
-            {recentRecords.length === 0 ? (
-              <View className="text-center py-8">
-                <View className="i-mdi-calendar-blank text-6xl text-muted-foreground mb-2" />
-                <Text className="text-sm text-muted-foreground">暂无打卡记录</Text>
-              </View>
-            ) : (
-              <View className="space-y-3">
-                {recentRecords.map((record) => (
-                  <View key={record.id} className="bg-gray-50/30 rounded-xl p-4">
-                    <View className="flex flex-row items-center justify-between mb-2">
-                      <Text className="text-sm font-medium text-foreground">{formatDate(record.date)}</Text>
-                      <Text className={`text-xs font-medium ${getStatusColor(record.status)}`}>
-                        {getStatusText(record.status)}
-                      </Text>
-                    </View>
-
-                    <View className="flex flex-row items-center justify-between text-xs text-muted-foreground">
-                      <View className="flex flex-row items-center">
-                        <View className="i-mdi-login text-base mr-1" />
-                        <Text>{formatTime(record.clock_in_time)}</Text>
-                      </View>
-
-                      <View className="flex flex-row items-center">
-                        <View className="i-mdi-logout text-base mr-1" />
-                        <Text>{formatTime(record.clock_out_time)}</Text>
-                      </View>
-
-                      <View className="flex flex-row items-center">
-                        <View className="i-mdi-clock-outline text-base mr-1" />
-                        <Text>{record.work_hours ? `${record.work_hours}h` : '--'}</Text>
-                      </View>
-                    </View>
+                {todayRecords.length === 0 ? (
+                  <View className="py-8 flex flex-col items-center">
+                    <View className="i-mdi-calendar-blank text-5xl text-gray-200" />
+                    <Text className="mt-2 text-sm text-gray-400">今日无排班，无需打卡</Text>
+                    <Text className="mt-1 text-xs text-gray-300">排班发布后这里会出现打卡入口</Text>
                   </View>
-                ))}
-              </View>
-            )}
-          </View>
+                ) : (
+                  <View className="space-y-3">
+                    {todayRecords.map((r) => {
+                      const proj = PROJ_LABEL[r.projection] || PROJ_LABEL.not_started
+                      const canClockIn = r.projection === 'not_started'
+                      const canClockOut = r.projection === 'in_progress'
+                      return (
+                        <View key={r.id} className="rounded-xl border border-gray-200 p-3">
+                          <View className="flex items-center justify-between mb-2">
+                            <View>
+                              <Text className="text-sm font-medium text-gray-800">
+                                {hm(r.planned_start_at)} – {hm(r.planned_end_at)}
+                              </Text>
+                              <Text className="text-xs text-gray-400 mt-0.5">
+                                {r.clock_in_at ? `上班 ${hm(r.clock_in_at)}` : '未打上班卡'}
+                                {r.clock_out_at ? ` · 下班 ${hm(r.clock_out_at)}` : ''}
+                                {r.work_hours ? ` · ${r.work_hours}h` : ''}
+                              </Text>
+                            </View>
+                            <View className={`px-2.5 py-1 rounded-full flex items-center gap-1 ${proj.tone}`}>
+                              <View className={`${proj.icon} text-sm`} />
+                              <Text className="text-xs font-medium">{proj.text}</Text>
+                            </View>
+                          </View>
 
-          {/* 底部占位 */}
-          <View className="h-4" />
+                          {(r.late_minutes > 0 || r.early_leave_minutes > 0) && (
+                            <View className="flex gap-3 text-xs text-warning-600 mb-2">
+                              {r.late_minutes > 0 && <Text>迟到 {r.late_minutes} 分钟</Text>}
+                              {r.early_leave_minutes > 0 && <Text>早退 {r.early_leave_minutes} 分钟</Text>}
+                            </View>
+                          )}
+
+                          {(canClockIn || canClockOut) && (
+                            <View
+                              className={`mt-2 rounded-xl py-3 text-center ${acting ? 'bg-gray-200' : canClockIn ? 'bg-primary-500 active:opacity-80' : 'bg-success-500 active:opacity-80'}`}
+                              onClick={() => (canClockIn ? clockIn(r.schedule_id) : clockOut(r.schedule_id))}>
+                              <Text className={`text-sm font-medium ${acting ? 'text-gray-400' : 'text-white'}`}>
+                                {acting ? '打卡中…' : canClockIn ? '上班打卡' : '下班打卡'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )
+                    })}
+                  </View>
+                )}
+
+                {actionError && (
+                  <View className="mt-3 bg-danger-50 rounded-lg p-2.5 flex items-start gap-1.5">
+                    <View className="i-mdi-alert-circle-outline text-sm text-danger-500 mt-0.5" />
+                    <Text className="text-xs text-danger-600 flex-1">{actionError}</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* 考勤记录 */}
+              <View className="bg-white rounded-2xl shadow-sm p-4">
+                <Text className="text-sm font-semibold text-gray-800 mb-3">考勤记录</Text>
+                {records.length === 0 ? (
+                  <View className="py-6 flex flex-col items-center">
+                    <View className="i-mdi-file-document-outline text-4xl text-gray-200" />
+                    <Text className="mt-2 text-xs text-gray-400">暂无考勤记录</Text>
+                  </View>
+                ) : (
+                  <View className="space-y-2">
+                    {records.slice(0, 10).map((r) => {
+                      const proj = PROJ_LABEL[r.projection] || PROJ_LABEL.not_started
+                      return (
+                        <View
+                          key={r.id}
+                          className="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2.5">
+                          <View>
+                            <Text className="text-sm text-gray-800">{md(r.business_date)}</Text>
+                            <Text className="text-xs text-gray-400 mt-0.5">
+                              {hm(r.planned_start_at)}–{hm(r.planned_end_at)}
+                              {r.clock_in_at ? ` · ${hm(r.clock_in_at)}` : ''}
+                              {r.clock_out_at ? `–${hm(r.clock_out_at)}` : ''}
+                            </Text>
+                          </View>
+                          <View className={`px-2 py-0.5 rounded-full ${proj.tone}`}>
+                            <Text className="text-2xs font-medium">{proj.text}</Text>
+                          </View>
+                        </View>
+                      )
+                    })}
+                  </View>
+                )}
+              </View>
+            </>
+          )}
         </View>
       </ScrollView>
     </View>
