@@ -1,291 +1,193 @@
 /**
- * 请假审批页面（管理员）
+ * 请假审批 · P2 重写（command RPC + DS）
+ * 管理者：看 pending 申请 → 审批（通过/拒绝 + 备注）
+ * DS：TabHero / StatsStrip / ErrorBanner / tokens
  */
 
-import {Button, ScrollView, Text, Textarea, View} from '@tarojs/components'
+import {ScrollView, Text, Textarea, View} from '@tarojs/components'
 import Taro, {useDidShow} from '@tarojs/taro'
 import {useAuth} from 'miaoda-auth-taro'
 import type React from 'react'
-import {useCallback, useEffect, useState} from 'react'
+import {useCallback, useState} from 'react'
 import {supabase} from '@/client/supabase'
-import type {LeaveRequestWithEmployee} from '@/db/types-leave'
-import {LEAVE_TYPE_NAMES} from '@/db/types-leave'
+import {ErrorBanner, StatsStrip, TabHero} from '@/components/ds'
+
+interface PendingRow {
+  id: string
+  leave_type: string
+  start_date: string
+  end_date: string
+  days: number | null
+  reason: string | null
+  status: string
+  employees?: {name?: string} | {name?: string}[] | null
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  annual_leave: '年假',
+  sick_leave: '病假',
+  personal_leave: '事假',
+  other: '其他'
+}
+
+const empName = (e: PendingRow['employees']) => (Array.isArray(e) ? e[0]?.name : e?.name) || '员工'
+const md = (d: string) => d.slice(5).replace('-', '月') + '日'
 
 const LeaveApproval: React.FC = () => {
-  const {user} = useAuth({guard: true})
-  const [requests, setRequests] = useState<LeaveRequestWithEmployee[]>([])
+  useAuth({guard: true})
   const [loading, setLoading] = useState(true)
-  const [processingId, setProcessingId] = useState<string | null>(null)
-  const [commentMap, setCommentMap] = useState<Record<string, string>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [rows, setRows] = useState<PendingRow[]>([])
+  const [comments, setComments] = useState<Record<string, string>>({})
+  const [acting, setActing] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
 
-  // 加载待审批申请
-  const loadRequests = useCallback(async () => {
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
     try {
-      setLoading(true)
-
-      // 获取租户ID
-      const tenantId = localStorage.getItem('currentTenantId') || ''
-      if (!tenantId) {
-        Taro.showToast({title: '请先选择租户', icon: 'error'})
-        return
-      }
-
-      // P2 命令权威：RLS 决定可见性（tenant_admin/store_manager 自动过滤 pending）
       const {data, error: qErr} = await supabase
         .from('leave_requests')
-        .select('*, employees(name), employees!leave_requests_employee_id_fkey(name)')
+        .select('id, leave_type, start_date, end_date, days, reason, status, employees(name)')
         .eq('status', 'pending')
         .order('created_at', {ascending: false})
         .limit(50)
       if (qErr) throw qErr
-      setRequests(data || [])
-    } catch (error) {
-      console.error('加载待审批申请失败:', error)
-      Taro.showToast({
-        title: '加载失败',
-        icon: 'error'
-      })
+      setRows((data || []) as unknown as PendingRow[])
+    } catch (e) {
+      console.error('加载待审批失败:', e)
+      setError('加载失败，请重试')
     } finally {
       setLoading(false)
     }
   }, [])
 
-  useEffect(() => {
-    loadRequests()
-  }, [loadRequests])
-
   useDidShow(() => {
-    loadRequests()
+    load()
   })
 
-  // 处理审批意见输入
-  const handleCommentChange = (requestId: string, value: string) => {
-    setCommentMap((prev) => ({
-      ...prev,
-      [requestId]: value
-    }))
-  }
-
-  // 批准申请
-  const handleApprove = async (requestId: string) => {
-    if (!user?.id) return
-
-    const result = await Taro.showModal({
-      title: '确认批准',
-      content: '确定要批准这个请假申请吗？'
+  const review = async (id: string, approve: boolean) => {
+    if (acting) return
+    const res = await Taro.showModal({
+      title: approve ? '通过申请' : '拒绝申请',
+      content: approve ? '确定通过这笔请假申请吗？' : '确定拒绝这笔请假申请吗？',
+      confirmText: approve ? '通过' : '拒绝',
+      cancelText: '再想想'
     })
-
-    if (!result.confirm) return
-
+    if (!res.confirm) return
+    setActing(id)
+    setActionError(null)
     try {
-      setProcessingId(requestId)
-
-      const {error} = await supabase.rpc('leave_review', {
-        p_request_id: requestId,
-        p_approve: true,
-        p_comment: commentMap[requestId] || null
+      const {error: e} = await supabase.rpc('leave_review', {
+        p_request_id: id,
+        p_approve: approve,
+        p_comment: comments[id]?.trim() || null
       })
-      if (error) {
-        Taro.showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
+      if (e) {
+        setActionError(e.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''))
         return
       }
-
-      Taro.showToast({
-        title: '已批准',
-        icon: 'success'
-      })
-
-      // 清除评论
-      setCommentMap((prev) => {
-        const newMap = {...prev}
-        delete newMap[requestId]
-        return newMap
-      })
-
-      loadRequests()
-    } catch (error) {
-      console.error('批准失败:', error)
-      Taro.showToast({
-        title: '批准失败',
-        icon: 'error'
-      })
+      Taro.showToast({title: approve ? '已通过' : '已拒绝', icon: 'success'})
+      load()
     } finally {
-      setProcessingId(null)
+      setActing('')
     }
-  }
-
-  // 拒绝申请
-  const handleReject = async (requestId: string) => {
-    if (!user?.id) return
-
-    const comment = commentMap[requestId]
-    if (!comment?.trim()) {
-      Taro.showToast({
-        title: '请填写拒绝原因',
-        icon: 'error'
-      })
-      return
-    }
-
-    const result = await Taro.showModal({
-      title: '确认拒绝',
-      content: '确定要拒绝这个请假申请吗？'
-    })
-
-    if (!result.confirm) return
-
-    try {
-      setProcessingId(requestId)
-
-      const {error} = await supabase.rpc('leave_review', {
-        p_request_id: requestId,
-        p_approve: false,
-        p_comment: comment.trim() || null
-      })
-      if (error) {
-        Taro.showToast({title: error.message.replace(/^(AUTH_DENIED|INVALID)[^:]*:\s*/, ''), icon: 'none', duration: 3000})
-        return
-      }
-
-      Taro.showToast({
-        title: '已拒绝',
-        icon: 'success'
-      })
-
-      // 清除评论
-      setCommentMap((prev) => {
-        const newMap = {...prev}
-        delete newMap[requestId]
-        return newMap
-      })
-
-      loadRequests()
-    } catch (error) {
-      console.error('拒绝失败:', error)
-      Taro.showToast({
-        title: '拒绝失败',
-        icon: 'error'
-      })
-    } finally {
-      setProcessingId(null)
-    }
-  }
-
-  // 渲染申请卡片
-  const renderRequestCard = (request: LeaveRequestWithEmployee) => {
-    const isProcessing = processingId === request.id
-    const comment = commentMap[request.id] || ''
-
-    return (
-      <View key={request.id} className="bg-white rounded-xl p-4 border-2 border-gray-200 mb-4 shadow">
-        {/* 员工信息 */}
-        <View className="flex flex-row items-center justify-between mb-3">
-          <View className="flex flex-row items-center">
-            <View className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
-              <View className="i-mdi-account text-2xl text-blue-600" />
-            </View>
-            <View>
-              <Text className="font-semibold">{request.employee.name}</Text>
-              {request.employee.phone && (
-                <Text className="text-xs text-muted-foreground mt-0.5">{request.employee.phone}</Text>
-              )}
-            </View>
-          </View>
-          <View className="px-3 py-1 bg-blue-100 rounded-full">
-            <Text className="text-xs font-medium text-blue-600">
-              {request.leave_type_obj?.type_name || LEAVE_TYPE_NAMES[request.leave_type]}
-            </Text>
-          </View>
-        </View>
-
-        {/* 日期和天数 */}
-        <View className="flex flex-row items-center mb-2">
-          <View className="i-mdi-calendar text-base text-muted-foreground mr-2" />
-          <Text className="text-sm text-foreground">
-            {request.start_date} ~ {request.end_date}
-          </Text>
-          <Text className="text-sm text-blue-600 ml-2 font-medium">({request.days} 天)</Text>
-        </View>
-
-        {/* 请假原因 */}
-        {request.reason && (
-          <View className="bg-gray-50/50 rounded-lg p-3 mb-3">
-            <Text className="text-xs text-muted-foreground mb-1">请假原因</Text>
-            <Text className="text-sm text-foreground">{request.reason}</Text>
-          </View>
-        )}
-
-        {/* 审批意见 */}
-        <View className="mb-3">
-          <Text className="text-xs text-muted-foreground mb-2">审批意见</Text>
-          <View style={{overflow: 'hidden'}}>
-            <Textarea
-              className="w-full bg-gray-50 rounded-lg p-3 text-sm"
-              placeholder="请输入审批意见（选填）"
-              value={comment}
-              onInput={(e) => handleCommentChange(request.id, e.detail.value)}
-              maxlength={200}
-              style={{minHeight: '80px'}}
-            />
-          </View>
-          <Text className="text-xs text-muted-foreground mt-1 text-right">{comment.length}/200</Text>
-        </View>
-
-        {/* 操作按钮 */}
-        <View className="flex flex-row space-x-3">
-          <Button
-            className="flex-1 bg-success text-success-foreground py-3 rounded-lg break-keep text-sm font-semibold"
-            size="default"
-            onClick={() => handleApprove(request.id)}
-            disabled={isProcessing}>
-            {isProcessing ? '处理中...' : '✓ 批准'}
-          </Button>
-
-          <Button
-            className="flex-1 bg-destructive text-destructive-foreground py-3 rounded-lg break-keep text-sm font-semibold"
-            size="default"
-            onClick={() => handleReject(request.id)}
-            disabled={isProcessing}>
-            {isProcessing ? '处理中...' : '✗ 拒绝'}
-          </Button>
-        </View>
-
-        {/* 申请时间 */}
-        <View className="mt-3 pt-3 border-t border-border">
-          <Text className="text-xs text-muted-foreground">
-            申请时间: {new Date(request.created_at).toLocaleString('zh-CN')}
-          </Text>
-        </View>
-      </View>
-    )
-  }
-
-  if (loading) {
-    return (
-      <View className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Text className="text-muted-foreground">加载中...</Text>
-      </View>
-    )
   }
 
   return (
     <View className="min-h-screen bg-gray-50">
-      {/* 头部统计 */}
-      <View className="bg-blue-100 text-white p-4">
-        <Text className="text-sm opacity-90">待审批申请</Text>
-        <Text className="text-3xl font-bold mt-1">{requests.length}</Text>
-      </View>
+      <TabHero title="请假审批" subtitle="待处理申请 · 服务端裁决" />
+      <ScrollView scrollY className="h-screen box-border bg-transparent">
+        <View className="px-4 pb-8 -mt-9">
+          <StatsStrip
+            items={[
+              {value: rows.length, label: '待审批'},
+              {value: rows.filter((r) => r.leave_type === 'annual_leave').length, label: '年假'},
+              {value: rows.filter((r) => r.leave_type === 'sick_leave').length, label: '病假'},
+              {
+                value: rows.filter((r) => r.leave_type === 'personal_leave' || r.leave_type === 'other').length,
+                label: '其他'
+              }
+            ]}
+          />
 
-      {/* 申请列表 */}
-      <ScrollView scrollY className="p-4" style={{height: 'calc(100vh - 100px)'}}>
-        {requests.length === 0 ? (
-          <View className="flex items-center justify-center py-20">
-            <View className="i-mdi-check-circle-outline text-6xl text-success mb-4" />
-            <Text className="text-muted-foreground">暂无待审批申请</Text>
+          {error && (
+            <View className="mt-3">
+              <ErrorBanner message={error} onRetry={load} />
+            </View>
+          )}
+
+          {actionError && (
+            <View className="mt-3 bg-danger-50 rounded-xl p-3 flex items-start gap-2">
+              <View className="i-mdi-alert-circle-outline text-lg text-danger-500 mt-0.5" />
+              <Text className="text-xs text-danger-600 flex-1">{actionError}</Text>
+            </View>
+          )}
+
+          <View className="mt-3 space-y-3">
+            {loading ? (
+              [0, 1].map((i) => <View key={i} className="bg-white rounded-2xl shadow-sm h-40 animate-pulse" />)
+            ) : rows.length === 0 ? (
+              <View className="bg-white rounded-2xl shadow-sm py-12 flex flex-col items-center">
+                <View className="i-mdi-check-all text-5xl text-gray-200" />
+                <Text className="mt-2 text-sm text-gray-400">暂无待审批的请假申请</Text>
+              </View>
+            ) : (
+              rows.map((r) => (
+                <View key={r.id} className="bg-white rounded-2xl shadow-sm p-4">
+                  <View className="flex items-center justify-between mb-3">
+                    <View className="flex items-center gap-2">
+                      <View className="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center">
+                        <View className="i-mdi-account-outline text-lg text-primary-500" />
+                      </View>
+                      <View>
+                        <Text className="text-sm font-semibold text-gray-800">{empName(r.employees)}</Text>
+                        <Text className="text-xs text-gray-400">
+                          {TYPE_LABEL[r.leave_type] || r.leave_type} · {r.days || 1} 天
+                        </Text>
+                      </View>
+                    </View>
+                    <View className="px-2.5 py-1 rounded-full bg-warning-50">
+                      <View className="i-mdi-clock-outline text-sm text-warning-600" />
+                      <Text className="text-xs text-warning-600 ml-1">待审批</Text>
+                    </View>
+                  </View>
+
+                  <View className="bg-gray-50 rounded-xl p-3">
+                    <Text className="text-sm text-gray-800">
+                      {md(r.start_date)} – {md(r.end_date)}
+                    </Text>
+                    {r.reason && <Text className="text-xs text-gray-500 mt-1">原因：{r.reason}</Text>}
+                  </View>
+
+                  <View className="mt-3">
+                    <Textarea
+                      className="bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 w-full"
+                      placeholder="审批备注（可选）…"
+                      value={comments[r.id] || ''}
+                      onInput={(e) => setComments((prev) => ({...prev, [r.id]: e.detail.value}))}
+                      maxlength={100}
+                      style={{minHeight: '56px'}}
+                    />
+                  </View>
+
+                  <View className="mt-3 flex gap-2">
+                    <View
+                      className="flex-1 text-center py-2.5 rounded-lg bg-success-500 active:opacity-80"
+                      onClick={() => review(r.id, true)}>
+                      <Text className="text-xs text-white">{acting === r.id ? '处理中…' : '通过'}</Text>
+                    </View>
+                    <View
+                      className="flex-1 text-center py-2.5 rounded-lg bg-gray-100 active:opacity-70"
+                      onClick={() => review(r.id, false)}>
+                      <Text className="text-xs text-danger-600">拒绝</Text>
+                    </View>
+                  </View>
+                </View>
+              ))
+            )}
           </View>
-        ) : (
-          requests.map((request) => renderRequestCard(request))
-        )}
+        </View>
       </ScrollView>
     </View>
   )
