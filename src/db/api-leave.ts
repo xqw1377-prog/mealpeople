@@ -261,7 +261,7 @@ export async function approveLeaveRequest(requestId: string, approverId: string,
     status: 'approved',
     approver_id: approverId,
     approved_at: new Date().toISOString(),
-    approval_notes: notes || null
+    approval_comment: notes || null
   })
 
   return result !== null
@@ -275,7 +275,7 @@ export async function rejectLeaveRequest(requestId: string, approverId: string, 
     status: 'rejected',
     approver_id: approverId,
     approved_at: new Date().toISOString(),
-    approval_notes: notes || null
+    approval_comment: notes || null
   })
 
   return result !== null
@@ -365,7 +365,7 @@ export async function checkLeaveConflict(employeeId: string, startDate: string, 
     .select('id')
     .eq('employee_id', employeeId)
     .in('status', ['pending', 'approved'])
-    .or(`start_date.lte.${endDate},end_date.gte.${startDate}`)
+    .lte('start_date', endDate).gte('end_date', startDate)
 
   if (error) {
     console.error('检查请假冲突失败:', error)

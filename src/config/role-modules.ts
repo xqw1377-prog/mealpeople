@@ -45,7 +45,7 @@ export const ALL_MODULES: ModuleConfig[] = [
     id: 'work-logs',
     name: '工作记录',
     icon: 'i-mdi-notebook-edit',
-    path: '/pages/work-logs/index',
+    path: '/pages/work-log/index',
     platform: 'mobile',
     category: 'efficiency',
     description: '快速记录工作内容、工作成果、问题反馈'

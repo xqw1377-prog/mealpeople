@@ -102,7 +102,7 @@ export interface UpdateLeaveRequestInput {
   status?: LeaveStatus
   approver_id?: string
   approved_at?: string
-  approval_notes?: string
+  approval_comment?: string
 }
 
 // ==================== 扩展类型 ====================

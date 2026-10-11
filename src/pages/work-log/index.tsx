@@ -113,7 +113,7 @@ const WorkLog: React.FC = () => {
         .eq('id', user.id)
         .maybeSingle()
       if (roleError) throw roleError
-      setIsAdmin(profile?.role === 'admin' || profile?.role === 'tenant_admin' || profile?.role === 'super_admin')
+      setIsAdmin(profile?.role === 'tenant_admin' || profile?.role === 'tenant_admin' || profile?.role === 'super_admin')
     } catch (e) {
       console.error('加载基础信息失败:', e)
       setBaseError('基础信息加载失败，请重试')
